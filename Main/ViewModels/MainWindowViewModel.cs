@@ -1,0 +1,3315 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using Microsoft.Win32;
+using System.Diagnostics;
+using System.Threading.Tasks;
+using System.Runtime.Versioning;
+using System.Timers;
+using ReactiveUI;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using SaveVaultApp.Models;
+using System.Windows.Input;
+using Avalonia.Controls;
+using Avalonia;
+
+namespace SaveVaultApp.ViewModels;
+
+public partial class MainWindowViewModel : ViewModelBase
+{
+    private readonly Settings _settings;
+    public Settings Settings => _settings;
+    
+    public ObservableCollection<ApplicationInfo> InstalledApps { get; } = new();
+    public ObservableCollection<ApplicationInfo> HiddenGames { get; } = new();
+
+    // Add backup timer
+    private readonly Timer _backupTimer;
+    private readonly string _backupRootFolder;
+    
+    // Add timer for UI updates
+    private readonly Timer _uiRefreshTimer;
+    
+    private bool _isHiddenGamesExpanded;
+    public bool IsHiddenGamesExpanded
+    {
+        get => _isHiddenGamesExpanded;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _isHiddenGamesExpanded, value);
+            _settings.HiddenGamesExpanded = value;
+            _settings.Save();
+        }
+    }
+
+    private ApplicationInfo? _selectedApp;
+    public ApplicationInfo? SelectedApp
+    {
+        get => _selectedApp;
+        set => this.RaiseAndSetIfChanged(ref _selectedApp, value);
+    }
+
+    private bool _isLoading;
+    public bool IsLoading
+    {
+        get => _isLoading;
+        set => this.RaiseAndSetIfChanged(ref _isLoading, value);
+    }
+
+    private string _statusMessage = "Ready";
+    public string StatusMessage
+    {
+        get => _statusMessage;
+        set => this.RaiseAndSetIfChanged(ref _statusMessage, value);
+    }
+
+    private ObservableCollection<ApplicationInfo> _runningApps = new();
+    public ObservableCollection<ApplicationInfo> RunningApps
+    {
+        get => _runningApps;
+        set => this.RaiseAndSetIfChanged(ref _runningApps, value);
+    }
+    
+    private readonly Timer _processCheckTimer;
+      private string _nextSaveText = string.Empty;
+    public string NextSaveText
+    {
+        get => _nextSaveText;
+        set => this.RaiseAndSetIfChanged(ref _nextSaveText, value);
+    }
+
+    private bool _isHoveringNextSave;
+    public bool IsHoveringNextSave
+    {
+        get => _isHoveringNextSave;
+        set => this.RaiseAndSetIfChanged(ref _isHoveringNextSave, value);
+    }
+      private bool _isLoginPopupOpen;
+    public bool IsLoginPopupOpen
+    {
+        get => _isLoginPopupOpen;
+        set => this.RaiseAndSetIfChanged(ref _isLoginPopupOpen, value);
+    }
+    
+    private string _username = string.Empty;
+    public string Username
+    {
+        get => _username;
+        set => this.RaiseAndSetIfChanged(ref _username, value);
+    }
+    
+    private string _password = string.Empty;
+    public string Password
+    {
+        get => _password;
+        set => this.RaiseAndSetIfChanged(ref _password, value);
+    }
+    
+    private string _email = string.Empty;
+    public string Email
+    {
+        get => _email;
+        set => this.RaiseAndSetIfChanged(ref _email, value);
+    }
+    
+    public bool IsLoggedIn => !string.IsNullOrEmpty(_settings.LoggedInUser);
+    
+    public string LoginStatusText => IsLoggedIn ? $"Logged in as {_settings.LoggedInUser}" : "Login";
+    
+    // Property to get the first letter of the logged-in username for the avatar
+    public string LoggedInInitial => IsLoggedIn && !string.IsNullOrEmpty(_settings.LoggedInUser) 
+        ? _settings.LoggedInUser.Substring(0, 1).ToUpper() 
+        : "?";
+
+    // Changed to internal to allow access from App.axaml.cs
+    internal Window? _mainWindow; 
+    public bool IsExiting { get; set; }
+
+    // Constructor to initialize the application
+    public MainWindowViewModel()
+    {
+        _settings = Settings.Load();
+        _selectedSortOption = _settings.SortOption;
+        _isHiddenGamesExpanded = _settings.HiddenGamesExpanded;
+        
+        // Initialize backup root folder
+        _backupRootFolder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SaveVault", "Backups");
+            
+        // Create backup directory if it doesn't exist
+        if (!Directory.Exists(_backupRootFolder))
+        {
+            Directory.CreateDirectory(_backupRootFolder);
+        }
+        
+        // Initialize process check timer with shorter interval
+        _processCheckTimer = new Timer(3000); // Check every 3 seconds
+        _processCheckTimer.Elapsed += OnProcessCheckTimerElapsed;
+        _processCheckTimer.AutoReset = true;
+        
+        // Initialize backup timer - check every second
+        _backupTimer = new Timer(1000); // Check every sec
+        _backupTimer.Elapsed += OnBackupTimerElapsed;
+        _backupTimer.AutoReset = true;
+        // Always start the backup timer regardless of global settings
+        // We need to keep checking for apps with custom settings
+        _backupTimer.Start(); 
+        Debug.WriteLine("Auto-save timer started with interval: " + _settings.AutoSaveInterval + " minutes");
+        
+        // Initialize UI refresh timer - update every second
+        _uiRefreshTimer = new Timer(1000); // Exactly 1 second
+        _uiRefreshTimer.Elapsed += OnUIRefreshTimerElapsed;
+        _uiRefreshTimer.AutoReset = true;
+        _uiRefreshTimer.Start(); // Start this timer immediately
+        
+        // Load the installed applications when the ViewModel is created
+        Task.Run(LoadInstalledAppsAsync).ContinueWith(_ => 
+        {
+            // Start process monitoring after apps are loaded
+            _processCheckTimer.Start();
+            if (_settings.GlobalAutoSaveEnabled)
+            {
+                _backupTimer.Start();
+                Debug.WriteLine($"Auto-save enabled with {_settings.AutoSaveInterval} minute interval");
+            }
+            UpdateRunningApplications();
+            StartBackgroundAppRefresh(); // Start background refresh after initial load
+        });
+
+        ExitApplicationCommand = new RelayCommand(() => 
+        {
+            IsExiting = true;
+            _mainWindow?.Close();
+            
+            // Force exit the application process
+            if (Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
+            {
+                desktop.Shutdown();
+            }
+            
+            // Ensure complete exit
+            Environment.Exit(0);
+        });
+    }
+
+    public void Initialize(Window window)
+    {
+        _mainWindow = window;
+        _mainWindow.WindowState = WindowState.Normal;
+    }
+
+    private void ShowWindow()
+    {
+        if (_mainWindow != null)
+        {
+            _mainWindow.WindowState = WindowState.Normal;
+            _mainWindow.Show();
+            _mainWindow.Activate();
+        }
+    }
+    
+    private void OnProcessCheckTimerElapsed(object? sender, ElapsedEventArgs e)
+    {
+        UpdateRunningApplications();
+    }
+    
+    private void OnBackupTimerElapsed(object? sender, ElapsedEventArgs e)
+    {
+        try
+        {
+            var currentTime = DateTime.Now;
+            // Find all currently running apps that have a valid save path
+            var runningApps = AllInstalledApps
+                .Where(app => app.IsRunning && 
+                              !string.IsNullOrEmpty(app.SavePath) && 
+                              app.SavePath != "Unknown" && 
+                              Directory.Exists(app.SavePath))
+                .ToList();
+            
+            if (runningApps.Count > 0)
+            {
+                foreach (var app in runningApps)
+                {
+                    try 
+                    {
+                        // Get auto-save settings based on whether app has custom settings
+                        bool isAutoSaveEnabled = app.HasCustomSettings
+                            ? app.CustomSettings.AutoSaveEnabled  // If app has custom settings, use those
+                            : _settings.GlobalAutoSaveEnabled;    // Otherwise use global setting
+
+                        int effectiveInterval = app.HasCustomSettings
+                            ? app.CustomSettings.AutoSaveInterval
+                            : _settings.AutoSaveInterval;
+
+                        // If app has custom settings and auto-save is enabled, proceed regardless of global setting
+                        // Otherwise, use global setting
+                        if (!(app.HasCustomSettings ? app.CustomSettings.AutoSaveEnabled : _settings.GlobalAutoSaveEnabled))
+                        {
+                            continue; // Skip if auto-save is disabled for this app
+                        }
+
+                        // Get the last backup time
+                        DateTime lastBackup;
+                        if (app.LastBackupTime != DateTime.MinValue)
+                        {
+                            lastBackup = app.LastBackupTime;
+                        }
+                        else if (_settings.LastBackupTimes.TryGetValue(app.ExecutablePath, out DateTime settingsLastBackup))
+                        {
+                            lastBackup = settingsLastBackup;
+                            app.LastBackupTime = settingsLastBackup; // Sync the LastBackupTime
+                        }
+                        else
+                        {
+                            lastBackup = DateTime.MinValue;
+                        }
+
+                        // Ensure interval is at least 1 minute
+                        if (effectiveInterval < 1) effectiveInterval = 1;
+
+                        // Calculate time difference in total minutes, rounding down to ensure full minutes have passed
+                        var timeSinceLastBackup = Math.Floor((currentTime - lastBackup).TotalMinutes);
+                        
+                        if (timeSinceLastBackup >= effectiveInterval)
+                        {
+                            Debug.WriteLine($"Creating backup for {app.Name}. Time since last backup: {timeSinceLastBackup:F0} minutes, Interval: {effectiveInterval} minutes");
+                            CreateBackup(app);
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"Not yet time for backup of {app.Name}. Time since last: {timeSinceLastBackup:F0} minutes, Need: {effectiveInterval} minutes");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Error processing backup for app {app.Name}: {ex.Message}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error during automatic backup check: {ex.Message}");
+        }
+    }
+    
+    private void CreateBackup(ApplicationInfo app)
+    {
+        try
+        {
+            // Skip if save path is invalid
+            if (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown" || !Directory.Exists(app.SavePath))
+                return;
+
+            // Check auto-save settings based on custom settings
+            bool shouldAutoSave = app.HasCustomSettings
+                ? app.CustomSettings.AutoSaveEnabled
+                : _settings.GlobalAutoSaveEnabled;
+
+            if (!shouldAutoSave)
+                return;
+
+            // Get the effective max auto-saves setting
+            int maxAutoSaves = app.HasCustomSettings
+                ? app.CustomSettings.MaxAutoSaves
+                : _settings.MaxAutoSaves;
+
+            // Count existing auto-saves and remove oldest ones if over limit
+            var autoSaves = app.BackupHistory
+                .Where(b => b.IsAutoBackup)
+                .OrderByDescending(b => b.Timestamp)
+                .ToList();
+
+            if (autoSaves.Count >= maxAutoSaves)
+            {
+                // Remove oldest auto-saves that exceed the limit
+                foreach (var oldSave in autoSaves.Skip(maxAutoSaves - 1))
+                {
+                    try
+                    {
+                        // Delete the backup files
+                        if (Directory.Exists(oldSave.BackupPath))
+                        {
+                            Directory.Delete(oldSave.BackupPath, true);
+                        }
+
+                        // Remove from UI collection
+                        app.BackupHistory.Remove(oldSave);
+
+                        // Remove from settings
+                        if (_settings.BackupHistory.TryGetValue(app.ExecutablePath, out var backupsInSettings))
+                        {
+                            backupsInSettings.RemoveAll(b => b.BackupPath == oldSave.BackupPath);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Error removing old backup {oldSave.BackupPath}: {ex.Message}");
+                    }
+                }
+            }
+
+            // Generate backup folder path (app-specific)
+            string appBackupFolder = Path.Combine(_backupRootFolder, SanitizePathName(app.Name));
+            if (!Directory.Exists(appBackupFolder))
+            {
+                Directory.CreateDirectory(appBackupFolder);
+            }
+            
+            // Create timestamp folder for this specific backup
+            string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+            string backupFolder = Path.Combine(appBackupFolder, timestamp);
+            Directory.CreateDirectory(backupFolder);
+            
+            // Count actual files copied
+            int filesCopied = 0;
+            
+            // Copy all files from the save directory to the backup folder
+            CopyDirectory(app.SavePath, backupFolder, ref filesCopied);
+            
+            // Only create a backup entry if files were actually copied
+            if (filesCopied > 0)
+            {
+                DateTime backupTimestamp = DateTime.Now; // Capture the exact time
+
+                // Create backup info (using ViewModel's SaveBackupInfo for UI)
+                var backupInfoVM = new ViewModels.SaveBackupInfo
+                {
+                    BackupPath = backupFolder,
+                    Timestamp = backupTimestamp,
+                    Description = $"Auto save ({timestamp})",
+                    IsAutoBackup = true
+                };
+                
+                // Create backup info for settings (using Model's SaveBackupInfo)
+                var backupInfoModel = new Models.SaveBackupInfo
+                {
+                    BackupPath = backupInfoVM.BackupPath,
+                    Timestamp = backupInfoVM.Timestamp,
+                    Description = backupInfoVM.Description,
+                    IsAutoBackup = backupInfoVM.IsAutoBackup
+                };
+
+                // Update app's backup history and last backup time (in memory)
+                app.LastBackupTime = backupTimestamp;
+                
+                // Update the last backup time in settings *before* saving
+                _settings.LastBackupTimes[app.ExecutablePath] = backupTimestamp;
+                  // Add to history on UI thread
+                Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    app.BackupHistory.Insert(0, backupInfoVM); // Add ViewModel version to UI at the beginning, not the end
+                    
+                    // Save Model version to settings
+                    if (!_settings.BackupHistory.ContainsKey(app.ExecutablePath))
+                    {
+                        _settings.BackupHistory[app.ExecutablePath] = new List<Models.SaveBackupInfo>();
+                    }
+                    _settings.BackupHistory[app.ExecutablePath].Add(backupInfoModel);
+                    
+                    // Update status message if this is the selected app
+                    if (SelectedApp == app)
+                    {
+                        int interval = app.HasCustomSettings ? 
+                            app.CustomSettings.AutoSaveInterval : _settings.AutoSaveInterval;
+                        StatusMessage = $"Created auto-save for '{app.Name}' (every {interval} minutes)";
+                    }
+                    
+                    // Save settings *after* the backup history is updated (moved inside UI thread)
+                    _settings.Save();
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error creating backup for {app.Name}: {ex.Message}");
+        }
+    }
+    
+    private void CopyDirectory(string sourceDir, string destDir, ref int filesCopied)
+    {
+        // Get the subdirectories for the specified directory
+        var dir = new DirectoryInfo(sourceDir);
+        
+        // Skip if directory doesn't exist
+        if (!dir.Exists)
+            return;
+            
+        // Create all subdirectories
+        DirectoryInfo[] dirs = dir.GetDirectories();
+        foreach (DirectoryInfo subdir in dirs)
+        {
+            string newDestDir = Path.Combine(destDir, subdir.Name);
+            Directory.CreateDirectory(newDestDir);
+            CopyDirectory(subdir.FullName, newDestDir, ref filesCopied);
+        }
+        
+        // Copy all files
+        FileInfo[] files = dir.GetFiles();
+        foreach (FileInfo file in files)
+        {
+            try
+            {
+                // Skip temp files, lock files, and very large files
+                if (file.Extension.Contains("tmp") || 
+                    file.Extension.Contains("lock") || 
+                    file.Length > 500 * 1024 * 1024) // Skip files larger than 500MB
+                {
+                    continue;
+                }
+                
+                string destFile = Path.Combine(destDir, file.Name);
+                file.CopyTo(destFile, false);
+                filesCopied++;
+            }
+            catch (Exception ex)
+            {
+                // Log but continue with other files
+                Debug.WriteLine($"Failed to copy file {file.FullName}: {ex.Message}");
+            }
+        }
+    }
+    
+    private string SanitizePathName(string name)
+    {
+        // Remove invalid characters from path
+        string invalidChars = new string(Path.GetInvalidFileNameChars());
+        string sanitized = string.Join("_", name.Split(invalidChars.ToCharArray(), 
+            StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
+            
+        // Replace spaces with underscores
+        return sanitized.Replace(' ', '_');
+    }
+
+    private string _searchText = string.Empty;
+    public string SearchText
+    {
+        get => _searchText;
+        set 
+        {
+            this.RaiseAndSetIfChanged(ref _searchText, value);
+            HandleSearchTextChanged(value);
+        }
+    }
+
+    [RelayCommand]
+    private void ClearSearch()
+    {
+        SearchText = string.Empty;
+    }
+
+    private string _selectedSortOption = "A-Z";
+    public string SelectedSortOption
+    {
+        get => _selectedSortOption;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _selectedSortOption, value);
+            _settings.SortOption = value;
+            _settings.Save();
+            ApplySort();
+        }
+    }
+
+    [RelayCommand]
+    private void SetSortOption(string sortOption)
+    {
+        if (sortOption != null && sortOption != SelectedSortOption)
+        {
+            SelectedSortOption = sortOption;
+            // SelectedSortOption property setter already handles saving to settings and applying the sort
+        }
+    }
+
+    [RelayCommand]
+    private void LaunchApp()
+    {
+        if (SelectedApp == null || string.IsNullOrEmpty(SelectedApp.ExecutablePath))
+            return;
+
+        try
+        {
+            // Check if start-save is enabled (either globally or in custom settings)
+            bool shouldCreateStartSave = SelectedApp.HasCustomSettings ? 
+                SelectedApp.CustomSettings.StartSaveEnabled : 
+                _settings.StartSaveEnabled;
+
+            // Create a start save before launching if enabled and save path exists
+            if (shouldCreateStartSave && 
+                !string.IsNullOrEmpty(SelectedApp.SavePath) && 
+                SelectedApp.SavePath != "Unknown" && 
+                Directory.Exists(SelectedApp.SavePath))
+            {
+                // Get the effective max start-saves setting
+                int maxStartSaves = SelectedApp.HasCustomSettings
+                    ? SelectedApp.CustomSettings.MaxStartSaves
+                    : _settings.MaxStartSaves;
+
+                // Count existing start saves and remove oldest ones if over limit
+                var startSaves = SelectedApp.BackupHistory
+                    .Where(b => b.Description.StartsWith("Start Save"))
+                    .OrderByDescending(b => b.Timestamp)
+                    .ToList();
+
+                if (startSaves.Count >= maxStartSaves)
+                {
+                    // Remove oldest start-saves that exceed the limit
+                    foreach (var oldSave in startSaves.Skip(maxStartSaves - 1))
+                    {
+                        try
+                        {
+                            // Delete the backup files
+                            if (Directory.Exists(oldSave.BackupPath))
+                            {
+                                Directory.Delete(oldSave.BackupPath, true);
+                            }
+
+                            // Remove from UI collection
+                            SelectedApp.BackupHistory.Remove(oldSave);
+
+                            // Remove from settings
+                            if (_settings.BackupHistory.TryGetValue(SelectedApp.ExecutablePath, out var backupsInSettings))
+                            {
+                                backupsInSettings.RemoveAll(b => b.BackupPath == oldSave.BackupPath);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error removing old start save {oldSave.BackupPath}: {ex.Message}");
+                        }
+                    }
+                }
+
+                // Generate backup folder path (app-specific)
+                string appBackupFolder = Path.Combine(_backupRootFolder, SanitizePathName(SelectedApp.Name));
+                if (!Directory.Exists(appBackupFolder))
+                {
+                    Directory.CreateDirectory(appBackupFolder);
+                }
+                
+                // Create timestamp folder for this specific backup
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                string backupFolder = Path.Combine(appBackupFolder, timestamp);
+                Directory.CreateDirectory(backupFolder);
+                
+                // Count actual files copied
+                int filesCopied = 0;
+                
+                // Copy all files from the save directory to the backup folder
+                CopyDirectory(SelectedApp.SavePath, backupFolder, ref filesCopied);
+                
+                // Only create a backup entry if files were actually copied
+                if (filesCopied > 0)
+                {
+                    // Create backup info (ViewModel version for UI)
+                    var backupInfoVM = new ViewModels.SaveBackupInfo
+                    {
+                        BackupPath = backupFolder,
+                        Timestamp = DateTime.Now,
+                        Description = $"Start Save ({timestamp})",
+                        IsAutoBackup = false
+                    };
+                    
+                    // Create backup info (Model version for settings)
+                    var backupInfoModel = new Models.SaveBackupInfo
+                    {
+                        BackupPath = backupInfoVM.BackupPath,
+                        Timestamp = backupInfoVM.Timestamp,
+                        Description = backupInfoVM.Description,
+                        IsAutoBackup = backupInfoVM.IsAutoBackup
+                    };
+                    
+                    // Update app's backup history and last backup time
+                    SelectedApp.LastBackupTime = DateTime.Now;
+                    SelectedApp.BackupHistory.Insert(0, backupInfoVM); // Add ViewModel version to UI at the top
+                    
+                    // Save Model version to settings
+                    if (!_settings.BackupHistory.ContainsKey(SelectedApp.ExecutablePath))
+                    {
+                        _settings.BackupHistory[SelectedApp.ExecutablePath] = new List<Models.SaveBackupInfo>();
+                    }
+                    _settings.BackupHistory[SelectedApp.ExecutablePath].Add(backupInfoModel);
+                    _settings.Save(); // Persist the new start save
+                    
+                    StatusMessage = $"Created start save for '{SelectedApp.Name}'";
+                }
+            }
+
+            // Launch the application
+            ProcessStartInfo startInfo = new ProcessStartInfo(SelectedApp.ExecutablePath)
+            {
+                UseShellExecute = true
+            };
+            var process = Process.Start(startInfo);
+
+            // Wait a short moment and check if process is running
+            Task.Delay(500).ContinueWith(_ =>
+            {
+                UpdateRunningApplications();
+            });
+            
+            // Update LastUsed time and persist it
+            SelectedApp.LastUsed = DateTime.Now;
+            _settings.LastUsedTimes[SelectedApp.ExecutablePath] = SelectedApp.LastUsed;
+            _settings.Save();
+            
+            // If sorted by last used, refresh the sort
+            if (SelectedSortOption == "Last Used")
+            {
+                ApplySort();
+            }
+            
+            // Immediately check running applications after launching
+            UpdateRunningApplications();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error launching application: {ex.Message}");
+            StatusMessage = $"Error launching application: {ex.Message}";
+        }
+    }
+
+    private void ApplySort()
+    {
+        var previouslySelectedApp = SelectedApp;
+
+        var sortedApps = SelectedSortOption switch
+        {
+            "A-Z" => InstalledApps.OrderBy(x => x.Name).ToList(),
+            "Z-A" => InstalledApps.OrderByDescending(x => x.Name).ToList(),
+            "Last Used" => InstalledApps.OrderByDescending(x => x.LastUsed).ToList(),
+            _ => InstalledApps.OrderBy(x => x.Name).ToList()
+        };
+
+        InstalledApps.Clear();
+        foreach (var app in sortedApps)
+        {
+            InstalledApps.Add(app);
+        }
+
+        // Restore the selection
+        if (previouslySelectedApp != null)
+        {
+            SelectedApp = InstalledApps.FirstOrDefault(a => a.ExecutablePath == previouslySelectedApp.ExecutablePath);
+        }
+    }
+
+    private void HandleSearchTextChanged(string value)
+    {
+        var previouslySelectedApp = SelectedApp;
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            // Reset to show all apps in their respective collections
+            LoadInstalledApps();
+            return;
+        }
+
+        // Get all matching apps
+        var matchingApps = AllInstalledApps
+            .Where(app => app.Name.Contains(value, StringComparison.OrdinalIgnoreCase) || 
+                         app.ExecutablePath.Contains(value, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // Update both collections
+        InstalledApps.Clear();
+        HiddenGames.Clear();
+
+        // Add all matching apps to main list
+        foreach (var app in matchingApps)
+        {
+            InstalledApps.Add(app);
+            
+            // Also add to hidden games if hidden
+            if (app.IsHidden)
+            {
+                HiddenGames.Add(app);
+            }
+        }
+
+        // Apply sort to all apps
+        ApplySort();
+
+        // Restore the selection
+        if (previouslySelectedApp != null)
+        {
+            SelectedApp = InstalledApps.FirstOrDefault(a => a.ExecutablePath == previouslySelectedApp.ExecutablePath);
+        }
+    }
+
+    private List<ApplicationInfo> AllInstalledApps { get; } = new();    
+    private void LoadInstalledApps()
+    {
+        InstalledApps.Clear();
+        HiddenGames.Clear();
+        foreach (var app in AllInstalledApps)
+        {
+            // Always add to InstalledApps to keep everything in main list
+            InstalledApps.Add(app);
+            
+            // Add to hidden games if hidden
+            if (app.IsHidden)
+            {
+                HiddenGames.Add(app);
+            }
+        }
+        ApplySort();
+    }
+
+    private async Task LoadInstalledAppsAsync()
+    {
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            IsLoading = true;
+            StatusMessage = "Loading applications...";
+
+            InstalledApps.Clear();
+            HiddenGames.Clear();
+            AllInstalledApps.Clear();
+        });
+
+        // If there is no cache, do a full search immediately
+        if (_settings.KnownApplicationPaths == null || _settings.KnownApplicationPaths.Count == 0)
+        {
+            var foundApps = new ObservableCollection<ApplicationInfo>();
+            if (OperatingSystem.IsWindows())
+            {
+                SearchForExecutables(foundApps);
+            }
+            // Add found apps to AllInstalledApps and UI collections
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                foreach (var app in foundApps)
+                {
+                    AllInstalledApps.Add(app);
+                    if (app.IsHidden)
+                        HiddenGames.Add(app);
+                    else
+                        InstalledApps.Add(app);
+                    // Save to cache for next time
+                    if (_settings.KnownApplicationPaths != null && !_settings.KnownApplicationPaths.Contains(app.ExecutablePath))
+                        _settings.KnownApplicationPaths.Add(app.ExecutablePath);
+                }
+                ApplySort();
+                IsLoading = false;
+                StatusMessage = $"Found {InstalledApps.Count} applications ({HiddenGames.Count} hidden)";
+                _settings.Save();
+            });
+            // Start background scan as usual
+            StartBackgroundAppRefresh();
+            return;
+        }
+
+        // 1. Instantly show all known apps (no file existence check)
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            IsLoading = true;
+            StatusMessage = "Loading applications...";
+
+            InstalledApps.Clear();
+            HiddenGames.Clear();
+            AllInstalledApps.Clear();
+
+            foreach (var exePath in _settings.KnownApplicationPaths)
+            {
+                var appName = Path.GetFileNameWithoutExtension(exePath);
+                var app = new ApplicationInfo(_settings)
+                {
+                    Name = appName,
+                    ExecutablePath = exePath,
+                    Path = Path.GetDirectoryName(exePath) ?? string.Empty
+                };
+
+                // Restore last used time
+                if (_settings.LastUsedTimes.TryGetValue(exePath, out DateTime lastUsed))
+                    app.LastUsed = lastUsed;
+
+                // Restore backup history
+                if (_settings.BackupHistory.TryGetValue(exePath, out var backupList))
+                {
+                    app.BackupHistory.Clear();
+                    foreach (var backup in backupList.OrderByDescending(b => b.Timestamp))
+                    {
+                        app.BackupHistory.Add(new SaveBackupInfo
+                        {
+                            BackupPath = backup.BackupPath,
+                            Timestamp = backup.Timestamp,
+                            Description = backup.Description,
+                            IsAutoBackup = backup.IsAutoBackup
+                        });
+                    }
+                    if (app.BackupHistory.Count > 0)
+                        app.LastBackupTime = app.BackupHistory.Max(b => b.Timestamp);
+                }
+
+                // Apply customizations
+                if (_settings.CustomNames != null && _settings.CustomNames.TryGetValue(exePath, out string? customName) && !string.IsNullOrWhiteSpace(customName))
+                    app.Name = customName;
+                if (_settings.CustomSavePaths != null && _settings.CustomSavePaths.TryGetValue(exePath, out string? customSavePath) && !string.IsNullOrWhiteSpace(customSavePath))
+                    app.SavePath = customSavePath;
+                if (_settings.HiddenApps != null)
+                    app.IsHidden = _settings.HiddenApps.Contains(exePath);
+                LoadAppSettings(app);
+
+                AllInstalledApps.Add(app);
+                if (app.IsHidden)
+                    HiddenGames.Add(app);
+                else
+                    InstalledApps.Add(app);
+            }
+            ApplySort();
+            IsLoading = false;
+            StatusMessage = $"Found {InstalledApps.Count} applications ({HiddenGames.Count} hidden)";
+        });
+
+        // 2. Start background scan to validate and update the list
+        StartBackgroundAppRefresh();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void SearchForExecutables(ObservableCollection<ApplicationInfo> installedApps)
+    {
+        var searchPaths = new List<string>();
+        
+        // Check all possible drive letters from A to Z
+        for (char driveLetter = 'A'; driveLetter <= 'Z'; driveLetter++)
+        {
+            string drivePath = $"{driveLetter}:\\";
+            
+            try
+            {
+                // Check if drive exists and is ready
+                var driveInfo = new DriveInfo(drivePath);
+                if (!driveInfo.IsReady)
+                {
+                    Debug.WriteLine($"Drive {drivePath} is not ready or doesn't exist");
+                    continue;
+                }
+
+                // Skip network drives for performance
+                if (driveInfo.DriveType == DriveType.Network)
+                {
+                    Debug.WriteLine($"Skipping network drive {drivePath}");
+                    continue;
+                }
+
+                Debug.WriteLine($"Scanning drive {drivePath} (Type: {driveInfo.DriveType})");
+
+                // Add common paths for this drive
+                var commonPaths = new[]
+                {
+                    "Program Files",
+                    "Program Files (x86)",
+                    "Games",
+                    "Downloaded Games",
+                    "GameDownloads",
+                    "MyGames",
+                    "GameSetup",
+                    "GameInstall",
+                    "GameLibrary",
+                    // Common game stores
+                    "Steam",
+                    "SteamLibrary",
+                    "Steam Library",
+                    "Epic Games",
+                    "GOG Games",
+                    "Origin Games",
+                    "EA Games",
+                    "Ubisoft",
+                    "Battle.net",
+                    "Xbox Games",
+                    // Publisher folders
+                    "2K Games",
+                    "Bethesda Softworks",
+                    "Square Enix",
+                    "THQ Nordic",
+                    "Deep Silver",
+                    "CD Projekt Red",
+                    "Devolver Digital",
+                    "Focus Home",
+                    "Paradox Interactive",
+                    "Rockstar Games",
+                    "SEGA",
+                    "Capcom",
+                    "Bandai Namco",
+                    "Warner Bros",
+                    "505 Games",
+                    "Team17",
+                    "Apogee",
+                    "Activision",
+                    "Konami",
+                    "LucasArts",
+                    "Codemasters",
+                    // Common user-created game folders
+                    "Downloaded Games",
+                    "Installed Games",
+                    "Old Games",
+                    "Classic Games",
+                    "Indie Games",
+                    "Game Collections",
+                    "Retro Games",
+                    "Strategy Games",
+                    "RPG Games",
+                    "Adventure Games",
+                    "Backup Games",
+                    "Offline Games"
+                };
+
+                foreach (var commonPath in commonPaths)
+                {
+                    // Check root level
+                    var rootPath = Path.Combine(drivePath, commonPath);
+                    if (Directory.Exists(rootPath))
+                    {
+                        searchPaths.Add(rootPath);
+                        
+                        try
+                        {
+                            // Add immediate subfolders of common game paths
+                            var subDirs = Directory.GetDirectories(rootPath);
+                            foreach (var subDir in subDirs)
+                            {
+                                if (!ShouldSkipDirectory(subDir))
+                                {
+                                    searchPaths.Add(subDir);
+                                    
+                                    // For game-related paths, go one level deeper
+                                    if (IsLikelyGamePath(subDir))
+                                    {
+                                        try
+                                        {
+                                            var gameSubDirs = Directory.GetDirectories(subDir);
+                                            searchPaths.AddRange(gameSubDirs.Where(dir => !ShouldSkipDirectory(dir)));
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Debug.WriteLine($"Error accessing subdirectories in {subDir}: {ex.Message}");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error accessing subdirectories in {rootPath}: {ex.Message}");
+                        }
+                    }
+
+                    // Check nested paths
+                    var nestedPaths = new[]
+                    {
+                        Path.Combine(drivePath, "Games", commonPath),
+                        Path.Combine(drivePath, "Program Files", commonPath),
+                        Path.Combine(drivePath, "Program Files (x86)", commonPath)
+                    };
+
+                    foreach (var nestedPath in nestedPaths)
+                    {
+                        if (Directory.Exists(nestedPath))
+                        {
+                            searchPaths.Add(nestedPath);
+                        }
+                    }
+                }
+
+                // Special handling for optical drives (CD/DVD)
+                if (driveInfo.DriveType == DriveType.CDRom)
+                {
+                    try
+                    {
+                        // Add the root of the CD/DVD
+                        searchPaths.Add(drivePath);
+                        
+                        // Add all first-level directories on the CD/DVD
+                        var cdDirs = Directory.GetDirectories(drivePath);
+                        foreach (var cdDir in cdDirs)
+                        {
+                            if (!ShouldSkipDirectory(cdDir))
+                            {
+                                searchPaths.Add(cdDir);
+                                
+                                // Also add subdirectories for deeper scanning
+                                try
+                                {
+                                    var subDirs = Directory.GetDirectories(cdDir);
+                                    searchPaths.AddRange(subDirs.Where(dir => !ShouldSkipDirectory(dir)));
+                                }
+                                catch (Exception ex)
+                                {
+                                    Debug.WriteLine($"Error accessing CD/DVD subdirectories in {cdDir}: {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Error accessing CD/DVD drive {drivePath}: {ex.Message}");
+                    }
+                }
+
+                // For fixed and removable drives, also check Users folder
+                if (driveInfo.DriveType == DriveType.Fixed || driveInfo.DriveType == DriveType.Removable)
+                {
+                    string usersFolder = Path.Combine(drivePath, "Users");
+                    if (Directory.Exists(usersFolder))
+                    {
+                        foreach (var userDir in Directory.GetDirectories(usersFolder))
+                        {
+                            // Add common user program locations
+                            string[] userProgramPaths = {
+                                Path.Combine(userDir, "AppData", "Local", "Programs"),
+                                Path.Combine(userDir, "AppData", "Local", "Games"),
+                                Path.Combine(userDir, "Documents", "My Games"),
+                                Path.Combine(userDir, "Games"),
+                                Path.Combine(userDir, "Downloads"),
+                                Path.Combine(userDir, "Desktop")
+                            };
+
+                            searchPaths.AddRange(userProgramPaths.Where(Directory.Exists));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error accessing drive {drivePath}: {ex.Message}");
+                continue;
+            }
+        }
+
+        // Add user profile paths that might be on any drive
+        var userPaths = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Games"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "My Games"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Games"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Games")
+        };
+        searchPaths.AddRange(userPaths.Where(Directory.Exists));
+
+        // Process each search path
+        var processedExecutables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var searchPath in searchPaths.Distinct())
+        {
+            if (!Directory.Exists(searchPath))
+            {
+                continue;
+            }
+            
+            try
+            {
+                SearchDirectoryForExecutables(searchPath, installedApps, processedExecutables);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error searching path {searchPath}: {ex.Message}");
+            }
+        }
+    }
+
+    private bool IsLikelyGamePath(string path)
+    {
+        string pathLower = path.ToLowerInvariant();
+        return pathLower.Contains("game") ||
+               pathLower.Contains("steam") ||
+               pathLower.Contains("gog") ||
+               pathLower.Contains("epic") ||
+               pathLower.Contains("origin") ||
+               pathLower.Contains("ubisoft") ||
+               pathLower.Contains("bethesda") ||
+               pathLower.Contains("rockstar") ||
+               pathLower.EndsWith("bin") ||
+               pathLower.EndsWith("binaries");
+    }
+
+    private bool ShouldSkipExecutable(FileInfo fileInfo)
+    {
+        string fileName = fileInfo.Name.ToLowerInvariant();
+        string dirName = Path.GetFileName(fileInfo.DirectoryName ?? string.Empty).ToLowerInvariant();
+        string fullPath = fileInfo.FullName.ToLowerInvariant();
+
+        // Skip browser-related executables and their components
+        if (fileName.Contains("chrome") ||
+            fileName.Contains("firefox") ||
+            fileName.Contains("edge") ||
+            fileName.Contains("opera") ||
+            fileName.Contains("brave") ||
+            fileName.Contains("mozilla") ||
+            fileName.Contains("iexplore") ||
+            fileName.Contains("msedge") ||
+            fileName.Contains("browser") ||
+            fileName.Contains("webview") ||
+            fileName.Contains("extension") ||
+            fileName.Contains("plugin") ||
+            fileName.Contains("crashreport") ||
+            fileName.Contains("updater") ||
+            fileName.Contains("notification") ||
+            fileName.Contains("gecko") ||
+            fileName.Contains("chromium") ||
+            fileName.Contains("electron") ||
+            fileName.Contains("webkit") ||
+            fileName.Contains("renderer") ||
+            fileName.Contains("debugger") ||
+            fileName.Contains("remoting") ||
+            fileName.Contains("network") ||
+            fileName.EndsWith("broker.exe") ||
+            fileName.EndsWith("sandbox.exe") ||
+            fileName.EndsWith("helper.exe") ||
+            fileName.EndsWith("gpu.exe") ||
+            fileName.EndsWith("utility.exe") ||
+            fileName.EndsWith("broker.exe") ||
+            fileName.EndsWith("crashpad.exe") ||
+            fileName.EndsWith("background.exe") ||
+            fileName.EndsWith("render.exe") ||
+            fileName.EndsWith("plugin-container.exe") ||
+            fileName.EndsWith("notification-helper.exe") ||
+            fileName.EndsWith("process.exe") ||
+            fileName.EndsWith("plugin-process.exe") ||
+            fileName.EndsWith("nativehost.exe") ||
+            fileName.EndsWith("web-helper.exe") ||
+            fileName.EndsWith("web-process.exe") ||
+            fileName.EndsWith("network-service.exe") ||
+            fileName.EndsWith("service.exe") ||
+            fileName.EndsWith("app_host.exe") ||
+            fileName.EndsWith("frame_host.exe") ||
+            fileName.EndsWith("watchdog.exe") ||
+            fileName.EndsWith("worker.exe") ||
+            fileName.EndsWith("ui_helper.exe") ||
+            fileName.EndsWith("native_host.exe") ||
+            fileName.EndsWith("service_client.exe") ||
+            fileName.EndsWith("renderer.exe") ||
+            fileName.EndsWith("host.exe") ||
+            fileName.EndsWith("-bin.exe") ||
+            fileName.EndsWith("_helper.exe") ||
+            fileName.EndsWith("subprocess.exe"))
+        {
+            return true;
+        }
+
+        // Skip if in browser-related directories
+        if (fullPath.Contains("\\chrome\\") ||
+            fullPath.Contains("\\firefox\\") ||
+            fullPath.Contains("\\edge\\") ||
+            fullPath.Contains("\\opera\\") ||
+            fullPath.Contains("\\brave\\") ||
+            fullPath.Contains("\\mozilla\\") ||
+            fullPath.Contains("\\internet explorer\\") ||
+            fullPath.Contains("\\microsoft\\edge\\") ||
+            fullPath.Contains("\\browser\\") ||
+            fullPath.Contains("\\browsers\\") ||
+            fullPath.Contains("\\extensions\\") ||
+            fullPath.Contains("\\plugins\\") ||
+            fullPath.Contains("\\web store\\") ||
+            fullPath.Contains("\\web apps\\") ||
+            fullPath.Contains("\\native messaging hosts\\") ||
+            fullPath.Contains("\\native-messaging-hosts\\") ||
+            fullPath.Contains("\\browser extensions\\") ||
+            fullPath.Contains("\\browser plugins\\") ||
+            fullPath.Contains("\\browser components\\") ||
+            fullPath.Contains("\\user data\\") ||
+            fullPath.Contains("\\browser cache\\") ||
+            fullPath.Contains("\\browser data\\") ||
+            fullPath.Contains("\\web data\\") ||
+            fullPath.Contains("\\temp browser\\"))
+        {
+            return true;
+        }
+
+        // Skip very small files unless they're in a games directory
+        bool isInGamesDir = IsLikelyGamePath(fileInfo.DirectoryName ?? string.Empty);
+        if (fileInfo.Length < 50 * 1024 && !isInGamesDir) // 50 KB minimum unless in games directory
+            return true;
+
+        // Skip common installer, uninstaller, and updater patterns
+        if (fileName.Contains("setup") ||
+            fileName.Contains("install") ||
+            fileName.Contains("update") ||
+            fileName.Contains("patch") ||
+            fileName.Contains("repair") ||
+            fileName.Contains("unins") ||
+            fileName.Contains("helper") ||
+            fileName.Contains("crash") ||
+            fileName.Contains("report") ||
+            fileName.Contains("config") ||
+            fileName.Contains("service") ||
+            fileName.Contains("vcredist") ||
+            fileName.Contains(".tmp") ||
+            fileName.Contains("bootstrapper") ||
+            fileName.Contains("cleanup") ||
+            fileName.Contains("debug") ||
+            fileName.Contains("diagnostic") ||
+            fileName.Contains("launcher") && fileInfo.Length < 1024 * 1024) // Skip small launchers
+        {
+            return true;
+        }
+
+        // Skip executables in directories commonly associated with installers or temporary files
+        if (dirName.Contains("installer") ||
+            dirName.Contains("temp") ||
+            dirName.Contains("tmp") ||
+            dirName.Contains("cache") ||
+            dirName.Contains("update") ||
+            dirName.Contains("patch") ||
+            dirName.Contains("setup") ||
+            dirName.Contains("install") ||
+            dirName.Contains("uninstall") ||
+            dirName.Contains("vcredist") ||
+            dirName.Contains("redist") ||
+            dirName.Contains("debug") ||
+            dirName.Contains("diagnostic"))
+        {
+            return true;
+        }
+
+        // Allow executables that are likely games
+        return !IsLikelyGameExecutable(fileName, dirName);
+    }
+
+    private bool IsLikelyGameExecutable(string fileName, string dirName)
+    {
+        fileName = fileName.ToLowerInvariant();
+        dirName = dirName.ToLowerInvariant();
+
+        // Common game executable patterns
+        return fileName.EndsWith("game.exe") ||
+               fileName == "game.exe" ||
+               fileName.Contains("start") ||
+               fileName.Contains("launch") ||
+               fileName == "client.exe" ||
+               fileName == "app.exe" ||
+               dirName.Contains("bin") ||
+               dirName.Contains("game") ||
+               // Common game engine executables
+               fileName.Contains("unreal") ||
+               fileName.Contains("unity") ||
+               fileName.Contains("cryengine") ||
+               fileName.Contains("godot") ||
+               // Common game executable names
+               fileName == "play.exe" ||
+               fileName == "run.exe" ||
+               fileName == "main.exe" ||
+               fileName == "default.exe" ||
+               fileName == "launcher.exe" && dirName.Contains("game");
+    }
+
+    private void SearchDirectoryForExecutables(string directory, ObservableCollection<ApplicationInfo> apps, 
+        HashSet<string> processedExecutables, int maxDepth = 6, int currentDepth = 0)
+    {
+        if (currentDepth > maxDepth)
+            return;
+            
+        try
+        {
+            if (ShouldSkipDirectory(directory))
+                return;
+
+            // First check binary folders specifically
+            var binFolders = Directory.GetDirectories(directory)
+                .Where(d => Path.GetFileName(d).ToLowerInvariant().Contains("bin") ||
+                           Path.GetFileName(d).ToLowerInvariant().Contains("binary"))
+                .ToList();
+
+            foreach (var binFolder in binFolders)
+            {
+                ProcessExecutablesInDirectory(binFolder, apps, processedExecutables);
+            }
+
+            // Then process current directory
+            ProcessExecutablesInDirectory(directory, apps, processedExecutables);
+            
+            // Recursively search subdirectories
+            foreach (var subDir in Directory.GetDirectories(directory))
+            {
+                try
+                {
+                    var dirInfo = new DirectoryInfo(subDir);
+                    
+                    // Skip hidden and system folders
+                    if (dirInfo.Attributes.HasFlag(FileAttributes.System) || 
+                        dirInfo.Attributes.HasFlag(FileAttributes.Hidden))
+                    {
+                        continue;
+                    }
+                    
+                    SearchDirectoryForExecutables(subDir, apps, processedExecutables, maxDepth, currentDepth + 1);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Skip directories we don't have access to
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error accessing directory {subDir}: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error searching directory {directory}: {ex.Message}");
+        }
+    }
+
+    private void ProcessExecutablesInDirectory(string directory, ObservableCollection<ApplicationInfo> apps, HashSet<string> processedExecutables)
+    {
+        foreach (var exePath in Directory.GetFiles(directory, "*.exe"))
+        {
+            if (processedExecutables.Contains(exePath))
+                continue;
+                
+            processedExecutables.Add(exePath);
+            
+            try
+            {
+                var fileInfo = new FileInfo(exePath);
+                
+                if (ShouldSkipExecutable(fileInfo))
+                    continue;
+
+                string appName = Path.GetFileNameWithoutExtension(exePath);
+                
+                if (!apps.Any(a => string.Equals(a.ExecutablePath, exePath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    apps.Add(new ApplicationInfo(_settings)
+                    {
+                        Name = appName,
+                        Path = Path.GetDirectoryName(exePath) ?? string.Empty,
+                        ExecutablePath = exePath
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error processing executable {exePath}: {ex.Message}");
+            }
+        }
+    }
+
+    private bool ShouldSkipDirectory(string directory)
+    {
+        string dirLower = directory.ToLowerInvariant();
+        string dirName = Path.GetFileName(directory).ToLowerInvariant();
+        string parentDirName = Path.GetFileName(Path.GetDirectoryName(directory) ?? string.Empty).ToLowerInvariant();
+        
+        // Skip our own program's folders
+        if (dirLower.Contains("savevault") || 
+            dirLower.Contains("save vault") ||
+            dirLower.Contains(@"etka\desktop\projeler\save vault"))
+        {
+            return true;
+        }
+        
+        // Skip browser-related directories
+        if (dirLower.Contains("chrome") ||
+            dirLower.Contains("firefox") ||
+            dirLower.Contains("edge") ||
+            dirLower.Contains("opera") ||
+            dirLower.Contains("brave") ||
+            dirLower.Contains("mozilla") ||
+            dirLower.Contains("internet explorer") ||
+            dirLower.Contains("browser") ||
+            dirLower.Contains("webview"))
+        {
+            return true;
+        }
+
+        // Skip helper and utility applications
+        if (dirName.Contains("helper") ||
+            dirName.Contains("utility") ||
+            dirName.Contains("assistant") ||
+            dirName.Contains("plugin") ||
+            dirName.Contains("extension") ||
+            dirName.Contains("service") ||
+            dirName.Contains("daemon") ||
+            dirName.Contains("runtime"))
+        {
+            return true;
+        }
+        
+        // Never skip game-related directories unless they're installation-related
+        if ((dirLower.Contains("game") ||
+            dirLower.Contains("steam") ||
+            dirLower.Contains("gog") ||
+            dirLower.Contains("epic") ||
+            dirLower.Contains("origin") ||
+            dirLower.Contains("downloads"))
+            && !(dirName == "installer" || dirName == "installers" || dirName == "install" || dirName == "setup"))
+        {
+            // Allow "installed games" type directories regardless of location
+            if (dirName == "installed games" || 
+                dirName == "games installed" ||
+                dirName == "installed" ||
+                dirName == "installs" && !dirName.Contains("installer"))
+            {
+                return false; // Don't skip installed game folders
+            }
+            return false;
+        }
+        
+        // Skip system directories
+        if (dirLower.Contains("system32") ||
+            dirLower.Contains("syswow64") ||
+            dirLower.Contains("$recycle.bin") ||
+            dirLower.Contains("system volume information") ||
+            dirLower.Contains("windows") ||
+            dirLower.Contains("drivers") ||
+            dirLower.Contains("winsxs") ||
+            dirLower.Contains("driverstore"))
+        {
+            return true;
+        }
+        
+        // Skip install-related directories - these are specifically folders that we should ignore
+        if (dirName == "installer" || 
+            dirName == "installers" ||
+            dirName == "install" ||
+            dirName == "setup" ||
+            dirName == "redist" || 
+            dirName == "redistributable" ||
+            dirName == "redistributables" ||
+            dirName == "uninstall" ||
+            dirName == "uninstaller" ||
+            dirName == "vcredist" ||
+            dirName == "packages" ||
+            dirName == "_install" ||
+            dirName == "_installer" ||
+            dirName == "_setup")
+        {
+            return true;
+        }
+        
+        // Skip if the parent directory is an installer directory
+        if (parentDirName == "installer" || 
+            parentDirName == "installers" || 
+            parentDirName == "install" || 
+            parentDirName == "setup" ||
+            parentDirName == "redistributable")
+        {
+            return true;
+        }
+        
+        // Skip other common non-game directories
+        if (dirName == "temp" ||
+            dirName == "tmp" ||
+            dirName == "cache" ||
+            dirName == "updates" ||
+            dirName == "update" ||
+            dirName == "logs" ||
+            dirName == "log")
+        {
+            return true;
+        }
+        
+        return false;
+    }
+
+    private string DetectSavePath(ApplicationInfo app)
+    {
+        // Extract useful information for path detection
+        string appName = app.Name;
+        string appNameLower = appName.ToLowerInvariant();
+        string execDir = Path.GetDirectoryName(app.ExecutablePath) ?? string.Empty;
+        
+        // Game-specific save path detection
+        if (appNameLower.Contains("steam") || execDir.Contains("steam", StringComparison.OrdinalIgnoreCase))
+        {
+            // For Steam games, try to find the Steam userdata folder
+            string? steamPath = Path.GetDirectoryName(execDir);
+            if (!string.IsNullOrEmpty(steamPath) && Directory.Exists(Path.Combine(steamPath, "userdata")))
+            {
+                return Path.Combine(steamPath, "userdata");
+            }
+        }
+        
+        // Special cases for common games
+        if (appNameLower.Contains("minecraft"))
+        {
+            string minecraftPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".minecraft");
+            if (Directory.Exists(minecraftPath))
+            {
+                return minecraftPath;
+            }
+        }
+        
+        // Check for Epic Games
+        if (appNameLower.Contains("epic games") || execDir.Contains("epic games", StringComparison.OrdinalIgnoreCase))
+        {
+            // Epic Games save paths often in LocalAppData/[GameName]
+            string epicSavesPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), appName);
+            if (Directory.Exists(epicSavesPath))
+            {
+                return epicSavesPath;
+            }
+        }
+        
+        // EA Games often save in Documents/Electronic Arts/[GameName]
+        string eaPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Electronic Arts", appName);
+        if (Directory.Exists(eaPath))
+        {
+            return eaPath;
+        }
+        
+        // Ubisoft games
+        string ubisoftPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Ubisoft", appName);
+        if (Directory.Exists(ubisoftPath))
+        {
+            return ubisoftPath;
+        }
+        
+        // Check for common patterns with different forms of the app name
+        // Try without spaces or special characters
+        string simplifiedName = new string(appName.Where(c => !char.IsPunctuation(c) && !char.IsWhiteSpace(c)).ToArray());
+        
+        // Common save path locations - check with various name formats
+        var possiblePaths = new List<string>
+        {
+            // Standard locations with exact app name
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), appName),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), appName),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), appName),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Saved Games", appName),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "My Games", appName),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "My Games", appName),
+            
+            // With simplified name (no spaces or punctuation)
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), simplifiedName),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), simplifiedName),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), simplifiedName),
+            
+            // Check for save folders in installation directory
+            Path.Combine(execDir, "Saves"),
+            Path.Combine(execDir, "SavedGames"),
+            Path.Combine(execDir, "SaveGames"),
+            Path.Combine(execDir, "save"),
+            Path.Combine(execDir, "saves"),
+            Path.Combine(execDir, "savegame"),
+            Path.Combine(execDir, "savegames"),
+            Path.Combine(execDir, "data", "saves"),
+            
+            // Additional common patterns
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SaveGames", appName),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", appName), // For Linux compatibility
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", simplifiedName),
+            
+            // Try parent directory of the executable
+            Path.Combine(Directory.GetParent(execDir)?.FullName ?? execDir, "Saves"),
+            Path.Combine(Directory.GetParent(execDir)?.FullName ?? execDir, "SavedGames")
+        };
+
+        foreach (var path in possiblePaths)
+        {
+            if (Directory.Exists(path))
+            {
+                Debug.WriteLine($"Found save path for {appName}: {path}");
+                return path;
+            }
+        }
+        
+        // Look for folders with "save" in the name in the installation directory
+        try
+        {
+            var potentialSaveDirs = Directory.GetDirectories(execDir)
+                .Where(dir => Path.GetFileName(dir).ToLowerInvariant().Contains("save"))
+                .ToList();
+                
+            if (potentialSaveDirs.Count > 0)
+            {
+                return potentialSaveDirs.First();
+            }
+            
+            // Also check the parent directory
+            string parentDir = Directory.GetParent(execDir)?.FullName ?? string.Empty;
+            if (Directory.Exists(parentDir))
+            {
+                potentialSaveDirs = Directory.GetDirectories(parentDir)
+                    .Where(dir => Path.GetFileName(dir).ToLowerInvariant().Contains("save"))
+                    .ToList();
+                    
+                if (potentialSaveDirs.Count > 0)
+                {
+                    return potentialSaveDirs.First();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error searching for save directories: {ex.Message}");
+        }
+
+        return "Unknown"; // Default if no save path is found
+    }
+
+    [RelayCommand]
+    public void ResetCache()
+    {
+        // Clear all saved data in settings
+        _settings.LastUsedTimes.Clear();
+        _settings.CustomNames.Clear();
+        _settings.CustomSavePaths.Clear();
+        _settings.HiddenApps.Clear();
+        _settings.Save();
+        
+        // Update UI status
+        StatusMessage = "Rescanning applications...";
+        IsLoading = true;
+        
+        // Clear current cached apps
+        AllInstalledApps.Clear();
+        InstalledApps.Clear();
+        HiddenGames.Clear();
+        RunningApps.Clear();
+        
+        // Run the scan again
+        Task.Run(async () =>
+        {
+            await LoadInstalledAppsAsync();
+        });
+    }
+
+    private bool _isEditingName;
+    public bool IsEditingName
+    {
+        get => _isEditingName;
+        set => this.RaiseAndSetIfChanged(ref _isEditingName, value);
+    }
+
+    private string _editableName = string.Empty;
+    public string EditableName
+    {
+        get => _editableName;
+        set => this.RaiseAndSetIfChanged(ref _editableName, value);
+    }
+
+    private bool _isEditingSavePath;
+    public bool IsEditingSavePath
+    {
+        get => _isEditingSavePath;
+        set => this.RaiseAndSetIfChanged(ref _isEditingSavePath, value);
+    }
+
+    private string _editableSavePath = string.Empty;
+    public string EditableSavePath
+    {
+        get => _editableSavePath;
+        set => this.RaiseAndSetIfChanged(ref _editableSavePath, value);
+    }
+    
+    private bool _isEditing;
+    public bool IsEditing
+    {
+        get => _isEditing;
+        set => this.RaiseAndSetIfChanged(ref _isEditing, value);
+    }
+
+    [RelayCommand]
+    public void EditApp()
+    {
+        if (SelectedApp == null)
+            return;
+
+        // Set both edit fields
+        EditableName = SelectedApp.Name;
+        EditableSavePath = SelectedApp.SavePath;
+        
+        // Enter edit mode
+        IsEditing = true;
+        IsEditingName = true;
+        IsEditingSavePath = true;
+    }
+
+    // Keep the original methods for backward compatibility
+    [RelayCommand]
+    public void EditAppName()
+    {
+        if (SelectedApp == null)
+            return;
+
+        EditableName = SelectedApp.Name;
+        IsEditingName = true;
+    }
+    
+    [RelayCommand]
+    public void EditSavePath()
+    {
+        if (SelectedApp == null)
+            return;
+
+        EditableSavePath = SelectedApp.SavePath;
+        IsEditingSavePath = true;
+    }
+
+    public void SaveAppName()
+    {
+        if (SelectedApp == null || !IsEditingName || string.IsNullOrWhiteSpace(EditableName))
+        {
+            CancelAll(); // Close all edit fields
+            return;
+        }
+
+        string oldName = SelectedApp.Name;
+        string newName = EditableName.Trim();
+        string executablePath = SelectedApp.ExecutablePath;
+
+        // Update the name in the selected app
+        SelectedApp.Name = newName;
+        
+        // Update the name in all applications list to reflect in UI
+        var appInList = AllInstalledApps.FirstOrDefault(a => 
+            string.Equals(a.ExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase));
+        
+        if (appInList != null)
+        {
+            appInList.Name = newName;
+        }
+
+        // Save custom names to settings
+        if (_settings.CustomNames == null)
+        {
+            _settings.CustomNames = new Dictionary<string, string>();
+        }
+        
+        _settings.CustomNames[executablePath] = newName;
+        _settings.Save();
+
+        // Close all edit fields
+        CancelAll();
+        StatusMessage = $"Renamed '{oldName}' to '{newName}'";
+        
+        // Store the currently selected app to restore it later
+        var currentApp = SelectedApp;
+        
+        // Safely refresh the list while maintaining selection
+        ApplicationInfo[] tempArray = InstalledApps.ToArray();
+        InstalledApps.Clear();
+        
+        // Apply sort to determine the new order
+        IEnumerable<ApplicationInfo> sortedApps = SelectedSortOption switch
+        {
+            "A-Z" => tempArray.OrderBy(x => x.Name),
+            "Z-A" => tempArray.OrderByDescending(x => x.Name),
+            "Last Used" => tempArray.OrderByDescending(x => x.LastUsed),
+            _ => tempArray.OrderBy(x => x.Name)
+        };
+        
+        // Add the sorted apps back to the collection
+        foreach (var app in sortedApps)
+        {
+            InstalledApps.Add(app);
+        }
+        
+        // Restore the selection to the same app
+        SelectedApp = InstalledApps.FirstOrDefault(a => 
+            string.Equals(a.ExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public void SaveSavePath()
+    {
+        if (SelectedApp == null || !IsEditingSavePath || string.IsNullOrWhiteSpace(EditableSavePath))
+        {
+            CancelAll(); // Close all edit fields
+            return;
+        }
+
+        string oldPath = SelectedApp.SavePath;
+        string newPath = EditableSavePath.Trim();
+        string executablePath = SelectedApp.ExecutablePath;
+
+        // Ensure the save path exists
+        if (!Directory.Exists(newPath))
+        {
+            StatusMessage = "Selected save path does not exist!";
+            return;
+        }
+
+        // Update the save path in the selected app
+        SelectedApp.SavePath = newPath;
+        
+        // Update the save path in all applications list
+        var appInList = AllInstalledApps.FirstOrDefault(a => 
+            string.Equals(a.ExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase));
+        
+        if (appInList != null)
+        {
+            appInList.SavePath = newPath;
+        }
+
+        // Initialize CustomSavePaths if null
+        _settings.CustomSavePaths ??= new Dictionary<string, string>();
+        
+        // Save or update custom save path
+        _settings.CustomSavePaths[executablePath] = newPath;
+        _settings.Save();
+
+        // Close all edit fields
+        CancelAll();
+        StatusMessage = $"Updated save path for '{SelectedApp.Name}'";
+    }
+
+    public void CancelAppNameEdit()
+    {
+        IsEditingName = false;
+    }
+
+    public void CancelSavePathEdit()
+    {
+        IsEditingSavePath = false;
+    }
+
+    [RelayCommand]
+    public void SaveAppNameCommand()
+    {
+        SaveAppName();
+    }
+    
+    [RelayCommand]
+    public void SaveSavePathCommand()
+    {
+        SaveSavePath();
+    }
+    
+    [RelayCommand]
+    public async Task BrowseForSavePath()
+    {
+        if (SelectedApp == null)
+            return;
+            
+        try
+        {
+            // Get the current top-level window
+            var topLevel = Avalonia.Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime;
+            var mainWindow = topLevel?.MainWindow;
+            
+            if (mainWindow != null)
+            {
+                // Use the StorageProvider API instead of the deprecated OpenFolderDialog
+                var folderPath = await mainWindow.StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
+                {
+                    Title = "Select Save Location",
+                    AllowMultiple = false
+                });
+
+                if (folderPath.Count > 0)
+                {
+                    // Get the folder path from the first selected item
+                    EditableSavePath = folderPath[0].Path.LocalPath;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error selecting folder: {ex.Message}";
+            Debug.WriteLine($"Error selecting folder: {ex.Message}");
+        }
+    }
+    
+    public void SaveAll()
+    {
+        if (SelectedApp == null || !IsEditing)
+            return;
+            
+        // Save both name and path
+        string executablePath = SelectedApp.ExecutablePath;
+        
+        if (IsEditingName && !string.IsNullOrWhiteSpace(EditableName))
+        {
+            string oldName = SelectedApp.Name;
+            string newName = EditableName.Trim();
+            
+            // Update the name in the selected app
+            SelectedApp.Name = newName;
+            
+            // Update the name in all applications list
+            var appInList = AllInstalledApps.FirstOrDefault(a => 
+                string.Equals(a.ExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase));
+            
+            if (appInList != null)
+            {
+                appInList.Name = newName;
+            }
+            
+            // Save custom name to settings
+            if (_settings.CustomNames == null)
+            {
+                _settings.CustomNames = new Dictionary<string, string>();
+            }
+            
+            _settings.CustomNames[executablePath] = newName;
+            StatusMessage = $"Renamed to '{newName}'";
+        }
+        
+        if (IsEditingSavePath && !string.IsNullOrWhiteSpace(EditableSavePath))
+        {
+            string newPath = EditableSavePath.Trim();
+            
+            // Update the save path in the selected app
+            SelectedApp.SavePath = newPath;
+            
+            // Update the save path in all applications list
+            var appInList = AllInstalledApps.FirstOrDefault(a => 
+                string.Equals(a.ExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase));
+            
+            if (appInList != null)
+            {
+                appInList.SavePath = newPath;
+            }
+            
+            // Save custom save path to settings
+            if (_settings.CustomSavePaths == null)
+            {
+                _settings.CustomSavePaths = new Dictionary<string, string>();
+            }
+            
+            _settings.CustomSavePaths[executablePath] = newPath;
+            StatusMessage = $"Updated details for '{SelectedApp.Name}'";
+        }
+        
+        _settings.Save();
+        
+        // Exit editing mode
+        IsEditing = false;
+        IsEditingName = false;
+        IsEditingSavePath = false;
+        
+        // Reapply sort if needed
+        ApplicationInfo[] tempArray = InstalledApps.ToArray();
+        InstalledApps.Clear();
+        
+        // Apply sort to determine the new order
+        IEnumerable<ApplicationInfo> sortedApps = SelectedSortOption switch
+        {
+            "A-Z" => tempArray.OrderBy(x => x.Name),
+            "Z-A" => tempArray.OrderByDescending(x => x.Name),
+            "Last Used" => tempArray.OrderByDescending(x => x.LastUsed),
+            _ => tempArray.OrderBy(x => x.Name)
+        };
+        
+        // Add the sorted apps back to the collection
+        foreach (var app in sortedApps)
+        {
+            InstalledApps.Add(app);
+        }
+        
+        // Restore the selection to the same app
+        SelectedApp = InstalledApps.FirstOrDefault(a => 
+            string.Equals(a.ExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase));
+    }
+    
+    public void CancelAll()
+    {
+        IsEditing = false;
+        IsEditingName = false;
+        IsEditingSavePath = false;
+    }
+    
+    [RelayCommand]
+    public void SaveAllCommand()
+    {
+        SaveAll();
+    }
+    
+    [RelayCommand]
+    public void CancelAllCommand()
+    {
+        CancelAll();
+    }    
+    [RelayCommand]
+    public void ToggleAppVisibility()
+    {
+        if (SelectedApp == null)
+            return;
+
+        // Store the selected app before modifying collections
+        var appToToggle = SelectedApp;
+
+        // Toggle hidden state
+        appToToggle.IsHidden = !appToToggle.IsHidden;
+        
+        // Save the hidden state in settings
+        if (_settings.HiddenApps == null)
+        {
+            _settings.HiddenApps = new HashSet<string>();
+        }
+        
+        // Update the hidden apps collection in settings
+        if (appToToggle.IsHidden)
+        {
+            _settings.HiddenApps.Add(appToToggle.ExecutablePath);
+            StatusMessage = $"'{appToToggle.Name}' is now marked as hidden";
+            
+            // Add to hidden games list (for the hidden section)
+            if (!HiddenGames.Contains(appToToggle))
+            {
+                HiddenGames.Add(appToToggle);
+            }
+            
+            // Keep in the main list but update UI
+            // Note: We no longer remove from InstalledApps
+        }
+        else
+        {
+            _settings.HiddenApps.Remove(appToToggle.ExecutablePath);
+            StatusMessage = $"'{appToToggle.Name}' is no longer hidden";
+            
+            // Remove from hidden games list
+            HiddenGames.Remove(appToToggle);
+            
+            // Make sure it's in the main list
+            if (!InstalledApps.Contains(appToToggle))
+            {
+                InstalledApps.Add(appToToggle);
+                // Reapply sort to maintain the sorting order
+                ApplySort();
+            }
+        }
+        
+        _settings.Save();
+    }
+
+    [RelayCommand]
+    public void ToggleHiddenGamesVisibility()
+    {
+        IsHiddenGamesExpanded = !IsHiddenGamesExpanded;
+    }
+
+    private void UpdateRunningApplications()
+    {
+        try
+        {
+            var processes = Process.GetProcesses();
+            var currentTime = DateTime.Now;
+            
+            // Get running app paths based on process names
+            var runningExecutables = processes
+                .Where(p => !string.IsNullOrEmpty(p.MainWindowTitle)) // Only processes with window titles
+                .Select(p => 
+                {
+                    try 
+                    {
+                        return p.MainModule?.FileName;
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                })
+                .Where(path => !string.IsNullOrEmpty(path))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            // Track if any running states actually changed
+            bool runningStateChanged = false;
+            
+            // Update IsRunning flag and LastUsed time for all apps
+            foreach (var app in AllInstalledApps)
+            {
+                bool wasRunning = app.IsRunning;
+                bool isNowRunning = runningExecutables.Contains(app.ExecutablePath);
+                
+                if (wasRunning != isNowRunning)
+                {
+                    app.IsRunning = isNowRunning;
+                    runningStateChanged = true;
+                }
+                
+                // Update LastUsed time for running apps
+                if (isNowRunning && (!wasRunning || (currentTime - app.LastUsed).TotalMinutes > 30))
+                {
+                    app.LastUsed = currentTime;
+                    _settings.LastUsedTimes[app.ExecutablePath] = currentTime;
+                }
+            }
+
+            // Only update UI if running states actually changed
+            if (runningStateChanged)
+            {
+                // Update the RunningApps collection on UI thread
+                Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => 
+                {
+                    RunningApps.Clear();
+                    foreach (var app in AllInstalledApps.Where(a => a.IsRunning).OrderBy(x => x.Name))
+                    {
+                        RunningApps.Add(app);
+                    }
+
+                    // Only reapply sorting if we're sorting by last used
+                    if (SelectedSortOption == "Last Used")
+                    {
+                        ApplySort();
+                    }
+                });
+            }
+
+            // Save settings after updating last used times
+            _settings.Save();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error updating running applications: {ex.Message}");
+        }
+    }
+
+    private void SaveNewAppsToSettings()
+    {
+        try
+        {
+            // Add all executable paths to known applications
+            foreach (var app in AllInstalledApps)
+            {
+                _settings.KnownApplicationPaths.Add(app.ExecutablePath);
+            }
+            
+            // Save settings to persist them
+            _settings.Save();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error saving new apps to settings: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void RestoreBackup(SaveBackupInfo backup)
+    {
+        if (SelectedApp == null || backup == null)
+            return;
+
+        try
+        {
+            if (!Directory.Exists(backup.BackupPath))
+            {
+                StatusMessage = "Backup folder not found!";
+                return;
+            }
+
+            if (!Directory.Exists(SelectedApp.SavePath))
+            {
+                StatusMessage = "Save folder not found!";
+                return;
+            }
+
+            // Create a backup of current save first
+            string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+            string currentBackupFolder = Path.Combine(_backupRootFolder, SanitizePathName(SelectedApp.Name), timestamp);
+            Directory.CreateDirectory(currentBackupFolder);
+
+            int filesCopied = 0;
+            CopyDirectory(SelectedApp.SavePath, currentBackupFolder, ref filesCopied);
+
+            if (filesCopied > 0)
+            {
+                var currentBackupInfo = new SaveBackupInfo
+                {
+                    BackupPath = currentBackupFolder,
+                    Timestamp = DateTime.Now,
+                    Description = "Automatic backup before restore",
+                    IsAutoBackup = false
+                };
+                SelectedApp.BackupHistory.Add(currentBackupInfo);
+            }
+
+            // Now restore the selected backup
+            DirectoryInfo saveDirInfo = new DirectoryInfo(SelectedApp.SavePath);
+            
+            // Delete all files in save directory
+            foreach (FileInfo file in saveDirInfo.GetFiles())
+            {
+                try
+                {
+                    file.Delete();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error deleting file {file.Name}: {ex.Message}");
+                }
+            }
+            
+            // Delete all subdirectories
+            foreach (DirectoryInfo dir in saveDirInfo.GetDirectories())
+            {
+                try
+                {
+                    dir.Delete(true);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error deleting directory {dir.Name}: {ex.Message}");
+                }
+            }
+
+            // Copy backup files to save directory
+            filesCopied = 0;
+            CopyDirectory(backup.BackupPath, SelectedApp.SavePath, ref filesCopied);
+
+            StatusMessage = $"Restored save from {backup.Description}";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error restoring backup: {ex.Message}";
+            Debug.WriteLine($"Error restoring backup: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void DeleteBackup(SaveBackupInfo backup)
+    {
+        if (SelectedApp == null || backup == null)
+            return;
+
+        try
+        {
+            if (Directory.Exists(backup.BackupPath))
+            {
+                Directory.Delete(backup.BackupPath, true);
+            }
+
+            // Remove from UI collection
+            SelectedApp.BackupHistory.Remove(backup);
+            
+            // Remove from settings
+            if (_settings.BackupHistory.TryGetValue(SelectedApp.ExecutablePath, out var backupsInSettings))
+            {
+                // Find the corresponding backup in settings based on path and remove it
+                backupsInSettings.RemoveAll(b => b.BackupPath == backup.BackupPath);
+                _settings.Save(); // Persist the deletion
+            }
+
+            StatusMessage = "Backup deleted successfully";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error deleting backup: {ex.Message}";
+            Debug.WriteLine($"Error deleting backup: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void OpenBackupFolder(SaveBackupInfo backup)
+    {
+        if (backup == null || string.IsNullOrEmpty(backup.BackupPath) || !Directory.Exists(backup.BackupPath))
+        {
+            StatusMessage = "Backup folder not found!";
+            return;
+        }
+
+        try
+        {
+            // Using Process.Start to open the folder in explorer
+            var processInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = backup.BackupPath,
+                UseShellExecute = true
+            };
+            System.Diagnostics.Process.Start(processInfo);
+            StatusMessage = $"Opened backup folder from {backup.Description}";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Failed to open backup folder: {ex.Message}";
+            Debug.WriteLine($"Error opening backup folder: {ex.Message}");
+        }
+    }
+
+    public void UpdateFromSettings()
+    {
+        // Stop the timer before potentially restarting it
+        _backupTimer.Stop(); 
+        
+        // Start or stop backup timer based on global setting
+        if (_settings.GlobalAutoSaveEnabled)
+        {
+            // Set timer interval to 1 minute for checking
+            _backupTimer.Interval = 60000; // Check every minute for precise timing
+            _backupTimer.Start();
+            Debug.WriteLine($"Auto-save timer restarted. Global interval: {_settings.AutoSaveInterval} minutes");
+            StatusMessage = $"Global auto-save enabled. Using {_settings.AutoSaveInterval} minute interval.";
+            
+            // Create initial backup for any running apps that need it
+            var currentTime = DateTime.Now;
+            var runningApps = AllInstalledApps
+                .Where(app => app.IsRunning && 
+                          !string.IsNullOrEmpty(app.SavePath) && 
+                          app.SavePath != "Unknown" && 
+                          Directory.Exists(app.SavePath))
+                .ToList();
+                
+            foreach (var app in runningApps)
+            {
+                if (app.LastBackupTime == DateTime.MinValue)
+                {
+                    CreateBackup(app);
+                }
+            }
+        }
+        else
+        {
+            Debug.WriteLine("Auto-save timer stopped - auto-save disabled");
+            StatusMessage = "Global auto-save disabled. No automatic backups will occur.";
+        }
+    }
+
+    [RelayCommand]
+    public void ToggleCustomSettings()
+    {
+        if (SelectedApp == null)
+            return;
+
+        SelectedApp.HasCustomSettings = !SelectedApp.HasCustomSettings;
+        
+        if (SelectedApp.HasCustomSettings)
+        {
+            // Initialize custom settings with current global settings
+            SelectedApp.CustomSettings = new AppSpecificSettings
+            {
+                HasCustomSettings = true,
+                AutoSaveInterval = _settings.AutoSaveInterval,
+                AutoSaveEnabled = _settings.GlobalAutoSaveEnabled,
+                StartSaveEnabled = _settings.StartSaveEnabled,
+                MaxAutoSaves = _settings.MaxAutoSaves,
+                MaxStartSaves = _settings.MaxStartSaves
+            };
+            
+            // Save to settings
+            _settings.AppSettings[SelectedApp.ExecutablePath] = SelectedApp.CustomSettings;
+            StatusMessage = $"Enabled custom settings for {SelectedApp.Name}";
+        }
+        else
+        {
+            // Remove custom settings
+            _settings.AppSettings.Remove(SelectedApp.ExecutablePath);
+            // Reset custom settings to default values instead of null
+            SelectedApp.CustomSettings = new AppSpecificSettings();
+            StatusMessage = $"Disabled custom settings for {SelectedApp.Name}";
+        }
+        
+        _settings.Save();
+    }
+
+    private void LoadAppSettings(ApplicationInfo app)
+    {
+        if (_settings.AppSettings.TryGetValue(app.ExecutablePath, out var customSettings))
+        {
+            app.HasCustomSettings = true;
+            app.CustomSettings = customSettings;
+        }
+    }
+    
+    private void OnUIRefreshTimerElapsed(object? sender, ElapsedEventArgs e)
+    {
+        // Notify UI about property changes for time-based elements
+        Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            // Update next save text
+            UpdateNextSaveText();
+              // Force UI refresh for all backup histories
+            if (SelectedApp != null)
+            {
+                // Trigger UI updates for all backup history items
+                foreach (var backup in SelectedApp.BackupHistory)
+                {
+                    // This will make the DateTimeToTimeAgoConverter re-convert the timestamp
+                    backup.RefreshTimeDisplay();
+                }
+                
+                // Also refresh LastBackupTime and LastUsed displays
+                SelectedApp.RefreshTimeDisplays();
+                
+                // Ensure the next save text is updated properly for the selected app
+                this.RaisePropertyChanged(nameof(NextSaveText));
+            }
+            
+            // Refresh time displays for all visible apps
+            foreach (var app in InstalledApps)
+            {
+                app.RefreshTimeDisplays();
+            }
+            
+            // Also refresh hidden games if expanded
+            if (IsHiddenGamesExpanded)
+            {
+                foreach (var app in HiddenGames)
+                {
+                    app.RefreshTimeDisplays();
+                }
+            }
+        });
+    }
+
+    [RelayCommand]
+    private void SaveNow()
+    {
+        if (SelectedApp != null && !string.IsNullOrEmpty(SelectedApp.SavePath) && 
+            SelectedApp.SavePath != "Unknown" && Directory.Exists(SelectedApp.SavePath))
+        {
+            // Generate backup folder path (app-specific)
+            string appBackupFolder = Path.Combine(_backupRootFolder, SanitizePathName(SelectedApp.Name));
+            if (!Directory.Exists(appBackupFolder))
+            {
+                Directory.CreateDirectory(appBackupFolder);
+            }
+            
+            // Create timestamp folder for this specific backup
+            string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+            string backupFolder = Path.Combine(appBackupFolder, timestamp);
+            Directory.CreateDirectory(backupFolder);
+            
+            // Count actual files copied
+            int filesCopied = 0;
+            
+            // Copy all files from the save directory to the backup folder
+            CopyDirectory(SelectedApp.SavePath, backupFolder, ref filesCopied);
+            
+            // Only create a backup entry if files were actually copied
+            if (filesCopied > 0)
+            {
+                // Create backup info with "Forced Save" type
+                var backupInfoVM = new ViewModels.SaveBackupInfo
+                {
+                    BackupPath = backupFolder,
+                    Timestamp = DateTime.Now,
+                    Description = $"Forced save ({timestamp})",
+                    IsAutoBackup = false // Not auto backup
+                };
+                
+                // Create backup info for settings
+                var backupInfoModel = new Models.SaveBackupInfo
+                {
+                    BackupPath = backupInfoVM.BackupPath,
+                    Timestamp = backupInfoVM.Timestamp,
+                    Description = backupInfoVM.Description,
+                    IsAutoBackup = backupInfoVM.IsAutoBackup
+                };
+
+                // Update app's backup history and last backup time
+                SelectedApp.LastBackupTime = DateTime.Now;
+                SelectedApp.BackupHistory.Insert(0, backupInfoVM);
+                
+                // Update the last backup time in settings
+                _settings.LastBackupTimes[SelectedApp.ExecutablePath] = SelectedApp.LastBackupTime;
+                
+                // Save to settings
+                if (!_settings.BackupHistory.ContainsKey(SelectedApp.ExecutablePath))
+                {
+                    _settings.BackupHistory[SelectedApp.ExecutablePath] = new List<Models.SaveBackupInfo>();
+                }
+                _settings.BackupHistory[SelectedApp.ExecutablePath].Add(backupInfoModel);
+                _settings.Save();
+                
+                StatusMessage = $"Created manual save for '{SelectedApp.Name}'";
+            }
+            else
+            {
+                StatusMessage = "No files were copied. Save might be empty.";
+            }
+        }
+        else
+        {
+            StatusMessage = "Save path is invalid or doesn't exist";
+        }
+    }
+
+    private void UpdateNextSaveText()
+    {
+        // Default to "Save Now" if there's no proper selection or if app isn't running
+        if (SelectedApp == null || !SelectedApp.IsRunning)
+        {
+            NextSaveText = "Save Now";
+            return;
+        }
+
+        bool isAutoSaveEnabled = SelectedApp.HasCustomSettings
+            ? SelectedApp.CustomSettings.AutoSaveEnabled
+            : _settings.GlobalAutoSaveEnabled;
+
+        // If auto-save isn't enabled, just show "Save Now"
+        if (!isAutoSaveEnabled)
+        {
+            NextSaveText = "Save Now";
+            return;
+        }
+
+        int effectiveInterval = SelectedApp.HasCustomSettings
+            ? SelectedApp.CustomSettings.AutoSaveInterval
+            : _settings.AutoSaveInterval;
+
+        if (effectiveInterval < 1) effectiveInterval = 1;
+
+        DateTime lastBackup = SelectedApp.LastBackupTime;
+        if (lastBackup == DateTime.MinValue && _settings.LastBackupTimes.TryGetValue(SelectedApp.ExecutablePath, out DateTime settingsLastBackup))
+        {
+            lastBackup = settingsLastBackup;
+        }
+
+        if (lastBackup != DateTime.MinValue)
+        {
+            var nextBackupTime = lastBackup.AddMinutes(effectiveInterval);
+            var timeUntilNext = nextBackupTime - DateTime.Now;
+
+            if (timeUntilNext.TotalSeconds <= 0)
+            {
+                NextSaveText = "Save Now";
+            }
+            else if (timeUntilNext.TotalMinutes < 1)
+            {
+                NextSaveText = $"Will save in {(int)timeUntilNext.TotalSeconds}s";
+            }
+            else
+            {
+                NextSaveText = $"Will save in {(int)timeUntilNext.TotalMinutes}m";
+            }
+        }
+        else
+        {
+            NextSaveText = "Save Now";
+        }
+    }
+
+    private void StartBackgroundAppRefresh()
+    {
+        // Only run this if we have apps already loaded
+        if (AllInstalledApps.Count == 0)
+            return;
+            
+        Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(5000); // Give the UI time to settle after initial load
+                
+                Debug.WriteLine("Starting background app refresh...");
+                var newApps = new ObservableCollection<ApplicationInfo>();
+                
+                if (OperatingSystem.IsWindows())
+                {
+                    // Create a hash set of existing paths for quick lookup
+                    var existingPaths = new HashSet<string>(
+                        AllInstalledApps.Select(a => a.ExecutablePath),
+                        StringComparer.OrdinalIgnoreCase
+                    );
+                    
+                    // Scan for new applications without affecting existing ones
+                    SearchForExecutables(newApps);
+                    
+                    // Only process apps that aren't already in our list
+                    var actuallyNewApps = newApps.Where(newApp => 
+                        !existingPaths.Contains(newApp.ExecutablePath)).ToList();
+                        
+                    if (actuallyNewApps.Count > 0)
+                    {
+                        Debug.WriteLine($"Found {actuallyNewApps.Count} new applications in background scan");
+                        
+                        // Process new apps on UI thread
+                        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => 
+                        {
+                            foreach (var newApp in actuallyNewApps)
+                            {
+                                // Configure new app settings
+                                if (_settings.CustomNames != null && _settings.CustomNames.TryGetValue(newApp.ExecutablePath, out string? customName))
+                                {
+                                    if (!string.IsNullOrWhiteSpace(customName))
+                                    {
+                                        newApp.Name = customName;
+                                    }
+                                }
+                                
+                                if (_settings.CustomSavePaths != null && _settings.CustomSavePaths.TryGetValue(newApp.ExecutablePath, out string? customSavePath))
+                                {
+                                    if (!string.IsNullOrWhiteSpace(customSavePath))
+                                    {
+                                        newApp.SavePath = customSavePath;
+                                    }
+                                }
+                                else
+                                {
+                                    newApp.SavePath = DetectSavePath(newApp);
+                                }
+                                
+                                // Apply hidden state if available
+                                if (_settings.HiddenApps != null)
+                                {
+                                    newApp.IsHidden = _settings.HiddenApps.Contains(newApp.ExecutablePath);
+                                }
+                                
+                                LoadAppSettings(newApp);
+                                
+                                // Add to AllInstalledApps
+                                AllInstalledApps.Add(newApp);
+                                
+                                // Add to the appropriate UI collection
+                                if (newApp.IsHidden)
+                                {
+                                    HiddenGames.Add(newApp);
+                                }
+                                else
+                                {
+                                    InstalledApps.Add(newApp);
+                                }
+                                
+                                // Save this app's path in known applications
+                                _settings.KnownApplicationPaths.Add(newApp.ExecutablePath);
+                            }
+                            
+                            // Apply sort only at the end
+                            ApplySort();
+                            
+                            // Save settings to persist the new apps
+                            _settings.Save();
+                            
+                            // Update status
+                            StatusMessage = $"Found {actuallyNewApps.Count} new applications";
+                        });
+                    }
+                    else
+                    {
+                        Debug.WriteLine("No new applications found in background scan");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error in background app refresh: {ex.Message}");
+            }
+        });
+    }    
+    // Login popup methods
+    [RelayCommand]
+    private void ShowLoginPopup()
+    {
+        IsLoginPopupOpen = true;
+    }
+      [RelayCommand]
+    private void CloseLoginPopup()
+    {
+        IsLoginPopupOpen = false;
+        // Clear the fields when closing
+        Password = string.Empty;
+        Email = string.Empty;
+    }
+      [RelayCommand]
+    private async Task Login()
+    {
+        if (string.IsNullOrWhiteSpace(Username) || string.IsNullOrWhiteSpace(Password))
+        {
+            StatusMessage = "Please enter both username/email and password";
+            return;
+        }
+        
+        try 
+        {
+            IsLoading = true;
+            StatusMessage = "Logging in...";
+            
+            // Create authentication service instance
+            var authService = new Services.AuthenticationService();
+            
+            // Attempt login with server - Username field can contain either username or email
+            var (success, message, token, username) = await authService.LoginAsync(Username, Password);
+            
+            if (success && !string.IsNullOrEmpty(token))
+            {
+                // Store token and username in settings
+                _settings.LoggedInUser = username;
+                _settings.AuthToken = token;
+                _settings.Save();
+                
+                // Close the popup
+                IsLoginPopupOpen = false;
+                
+                // Show success message
+                StatusMessage = $"Logged in as {username}";
+                
+                // Clear password but keep username
+                Password = string.Empty;
+                
+                // Notify UI about login status change
+                this.RaisePropertyChanged(nameof(IsLoggedIn));
+                this.RaisePropertyChanged(nameof(LoginStatusText));
+            }
+            else 
+            {
+                StatusMessage = message;
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Login error: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+      [RelayCommand]
+    private async Task Register()
+    {
+        if (string.IsNullOrWhiteSpace(Username) || string.IsNullOrWhiteSpace(Password) || string.IsNullOrWhiteSpace(Email))
+        {
+            StatusMessage = "Please enter username, email and password";
+            return;
+        }
+        
+        try 
+        {
+            IsLoading = true;
+            StatusMessage = "Creating account...";
+            
+            // Create authentication service instance
+            var authService = new Services.AuthenticationService();
+            
+            // Attempt registration with server
+            var (success, message, token, username) = await authService.RegisterAsync(Username, Email, Password);
+            
+            if (success && !string.IsNullOrWhiteSpace(token))
+            {
+                // Store token and username in settings
+                _settings.LoggedInUser = username;
+                _settings.AuthToken = token;
+                _settings.Save();
+                
+                // Close the popup
+                IsLoginPopupOpen = false;
+                
+                // Show success message
+                StatusMessage = $"Registered and logged in as {username}";
+                
+                // Clear password but keep username and email
+                Password = string.Empty;
+                
+                // Notify UI about login status change
+                this.RaisePropertyChanged(nameof(IsLoggedIn));
+                this.RaisePropertyChanged(nameof(LoginStatusText));
+            }
+            else 
+            {
+                StatusMessage = message;
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Registration error: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+      [RelayCommand]
+    private async Task ForgotPassword()
+    {
+        if (string.IsNullOrWhiteSpace(Username) || string.IsNullOrWhiteSpace(Email))
+        {
+            StatusMessage = "Please enter both username and email";
+            return;
+        }
+        
+        try 
+        {
+            IsLoading = true;
+            StatusMessage = "Sending password reset request...";
+            
+            // Create authentication service instance
+            var authService = new Services.AuthenticationService();
+            
+            // Attempt password reset with server
+            var (success, message) = await authService.ForgotPasswordAsync(Username, Email);
+            
+            if (success)
+            {
+                StatusMessage = "Password reset instructions sent to your email";
+            }
+            else 
+            {
+                StatusMessage = message;
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Password reset error: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }    [RelayCommand]
+    private void ShowProfile()
+    {
+        if (!IsLoggedIn)
+        {
+            // If not logged in, show login popup directly
+            ShowLoginPopup();
+            return;
+        }
+        
+        // Toggle the profile panel visibility
+        IsProfilePanelOpen = true;
+        
+        // Close other panels if they're open
+        IsAddAppPanelOpen = false;
+        IsLoginPopupOpen = false;
+        
+        // Show profile information
+        StatusMessage = $"Viewing profile for {_settings.LoggedInUser}";
+    }
+      [RelayCommand]
+    private void Logout()
+    {
+        if (!IsLoggedIn)
+            return;
+            
+        // Close the profile panel first
+        IsProfilePanelOpen = false;
+            
+        // Clear authentication data
+        _settings.LoggedInUser = null;
+        _settings.AuthToken = null;
+        _settings.Save();
+        
+        // Update UI
+        StatusMessage = "Successfully logged out";
+        this.RaisePropertyChanged(nameof(IsLoggedIn));
+        this.RaisePropertyChanged(nameof(LoginStatusText));
+        this.RaisePropertyChanged(nameof(LoggedInInitial));
+    }
+    
+    // System tray commands
+    public ICommand ExitApplicationCommand { get; private set; }    // Panel visibility properties
+    private bool _isAddAppPanelOpen;
+    public bool IsAddAppPanelOpen
+    {
+        get => _isAddAppPanelOpen;
+        set => this.RaiseAndSetIfChanged(ref _isAddAppPanelOpen, value);
+    }
+      private bool _isProfilePanelOpen;
+    public bool IsProfilePanelOpen
+    {
+        get => _isProfilePanelOpen;
+        set => this.RaiseAndSetIfChanged(ref _isProfilePanelOpen, value);
+    }
+    
+    [RelayCommand]
+    private void CloseProfilePanel()
+    {
+        IsProfilePanelOpen = false;
+    }
+      private string _newAppName = string.Empty;
+    public string NewAppName
+    {
+        get => _newAppName;
+        set => this.RaiseAndSetIfChanged(ref _newAppName, value);
+    }
+
+    private string _newAppLocationFolder = string.Empty;
+    public string NewAppLocationFolder
+    {
+        get => _newAppLocationFolder;
+        set => this.RaiseAndSetIfChanged(ref _newAppLocationFolder, value);
+    }
+    
+    private string _newAppExecutablePath = string.Empty;
+    public string NewAppExecutablePath
+    {
+        get => _newAppExecutablePath;
+        set => this.RaiseAndSetIfChanged(ref _newAppExecutablePath, value);
+    }
+    
+    private string _newAppSavePath = string.Empty;
+    public string NewAppSavePath
+    {
+        get => _newAppSavePath;
+        set => this.RaiseAndSetIfChanged(ref _newAppSavePath, value);
+    }
+    
+    // Add Application Panel Commands    [RelayCommand]
+    private void ShowAddAppPanel()
+    {
+        // Reset the form fields
+        NewAppName = string.Empty;
+        NewAppLocationFolder = string.Empty;
+        NewAppExecutablePath = string.Empty;
+        NewAppSavePath = string.Empty;
+        
+        // Show the panel
+        IsAddAppPanelOpen = true;
+    }
+      [RelayCommand]    private void CloseAddAppPanel()
+    {
+        IsAddAppPanelOpen = false;
+    }
+
+    [RelayCommand]
+    private async Task BrowseForLocationFolder()
+    {
+        try
+        {
+            // Get the current top-level window
+            var topLevel = Avalonia.Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime;
+            var mainWindow = topLevel?.MainWindow;
+            
+            if (mainWindow != null)
+            {
+                // Use the StorageProvider API
+                var folderResult = await mainWindow.StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
+                {
+                    Title = "Select Application Location Folder",
+                    AllowMultiple = false
+                });
+
+                if (folderResult.Count > 0)
+                {
+                    NewAppLocationFolder = folderResult[0].Path.LocalPath;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error selecting folder: {ex.Message}";
+            Debug.WriteLine($"Error selecting folder: {ex.Message}");
+        }
+    }
+    
+    [RelayCommand]
+    private async Task BrowseForExecutable()
+    {
+        try
+        {
+            // Get the current top-level window
+            var topLevel = Avalonia.Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime;
+            var mainWindow = topLevel?.MainWindow;
+            
+            if (mainWindow != null)
+            {
+                // Use the StorageProvider API
+                var fileResult = await mainWindow.StorageProvider.OpenFilePickerAsync(new Avalonia.Platform.Storage.FilePickerOpenOptions
+                {
+                    Title = "Select Application Executable",
+                    AllowMultiple = false,
+                    FileTypeFilter = new[] 
+                    { 
+                        new Avalonia.Platform.Storage.FilePickerFileType("Executable Files")
+                        {
+                            Patterns = new[] { "*.exe" }
+                        },
+                        new Avalonia.Platform.Storage.FilePickerFileType("All Files")
+                        {
+                            Patterns = new[] { "*.*" }
+                        }
+                    }
+                });
+
+                if (fileResult.Count > 0)
+                {
+                    NewAppExecutablePath = fileResult[0].Path.LocalPath;
+                    
+                    // If location folder is empty, set it to the directory containing the executable
+                    if (string.IsNullOrEmpty(NewAppLocationFolder))
+                    {
+                        NewAppLocationFolder = Path.GetDirectoryName(NewAppExecutablePath) ?? string.Empty;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error selecting file: {ex.Message}";
+            Debug.WriteLine($"Error selecting file: {ex.Message}");
+        }
+    }
+    
+    [RelayCommand]
+    private async Task BrowseForSaveLocation()
+    {
+        try
+        {
+            // Get the current top-level window
+            var topLevel = Avalonia.Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime;
+            var mainWindow = topLevel?.MainWindow;
+            
+            if (mainWindow != null)
+            {
+                // Use the StorageProvider API
+                var folderResult = await mainWindow.StorageProvider.OpenFolderPickerAsync(new Avalonia.Platform.Storage.FolderPickerOpenOptions
+                {
+                    Title = "Select Save Location Folder",
+                    AllowMultiple = false
+                });
+
+                if (folderResult.Count > 0)
+                {
+                    NewAppSavePath = folderResult[0].Path.LocalPath;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error selecting folder: {ex.Message}";
+            Debug.WriteLine($"Error selecting folder: {ex.Message}");
+        }
+    }
+    
+    [RelayCommand]
+    private void AddNewApplication()
+    {
+        if (string.IsNullOrWhiteSpace(NewAppExecutablePath))
+        {
+            StatusMessage = "Executable path is required";
+            return;
+        }
+        
+        // Check if the executable exists
+        if (!File.Exists(NewAppExecutablePath))
+        {
+            StatusMessage = "Executable file does not exist";
+            return;
+        }
+        
+        // Check if app is already in the list
+        if (AllInstalledApps.Any(app => string.Equals(app.ExecutablePath, NewAppExecutablePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            StatusMessage = "This application is already in your list";
+            CloseAddAppPanel();
+            return;
+        }
+        
+        try
+        {            // Create a new ApplicationInfo object
+            var defaultName = Path.GetFileNameWithoutExtension(NewAppExecutablePath);
+            var app = new ApplicationInfo(_settings)
+            {
+                Name = !string.IsNullOrWhiteSpace(NewAppName) ? NewAppName.Trim() : defaultName,
+                ExecutablePath = NewAppExecutablePath,
+                Path = !string.IsNullOrEmpty(NewAppLocationFolder) ? NewAppLocationFolder : Path.GetDirectoryName(NewAppExecutablePath) ?? string.Empty
+            };
+            
+            // Set the save path if provided, otherwise detect it
+            if (!string.IsNullOrEmpty(NewAppSavePath) && Directory.Exists(NewAppSavePath))
+            {
+                app.SavePath = NewAppSavePath;
+                
+                // Save custom save path to settings
+                if (_settings.CustomSavePaths == null)
+                {
+                    _settings.CustomSavePaths = new Dictionary<string, string>();
+                }
+                _settings.CustomSavePaths[NewAppExecutablePath] = NewAppSavePath;
+            }
+            else
+            {
+                app.SavePath = DetectSavePath(app);
+            }
+            
+            // Add to collections
+            AllInstalledApps.Add(app);
+            InstalledApps.Add(app);
+            
+            // Add to known applications
+            _settings.KnownApplicationPaths.Add(app.ExecutablePath);
+            _settings.Save();
+            
+            // Apply sort to maintain order
+            ApplySort();
+            
+            // Update status
+            StatusMessage = $"Added '{app.Name}' to your applications";
+            
+            // Close the panel
+            CloseAddAppPanel();
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Error adding application: {ex.Message}";
+            Debug.WriteLine($"Error adding application: {ex.Message}");
+        }
+    }
+    
+    public IRelayCommand ShowAddAppPanelCommand => ShowAddAppPanelCommandImpl ??= new RelayCommand(ShowAddAppPanel);
+    private IRelayCommand? ShowAddAppPanelCommandImpl;
+} 
+
+public class ApplicationInfo : ReactiveObject
+{
+    // Add reference to settings
+    private readonly Settings? _settings;
+    
+    // Constructor to initialize settings
+    public ApplicationInfo(Settings settings)
+    {
+        _settings = settings;
+    }
+
+    private string _name = string.Empty;
+    public string Name 
+    { 
+        get => _name; 
+        set => this.RaiseAndSetIfChanged(ref _name, value);
+    }
+    
+    private string _path = string.Empty;
+    public string Path 
+    { 
+        get => _path; 
+        set => this.RaiseAndSetIfChanged(ref _path, value);
+    }
+    
+    private string _executablePath = string.Empty;
+    public string ExecutablePath 
+    { 
+        get => _executablePath; 
+        set => this.RaiseAndSetIfChanged(ref _executablePath, value);
+    }
+    
+    private DateTime _lastUsed = DateTime.MinValue;
+    public DateTime LastUsed 
+    { 
+        get => _lastUsed; 
+        set => this.RaiseAndSetIfChanged(ref _lastUsed, value);
+    }
+    
+    private string _savePath = string.Empty;
+    public string SavePath 
+    { 
+        get => _savePath; 
+        set => this.RaiseAndSetIfChanged(ref _savePath, value);
+    }
+    
+    private bool _isRunning;
+    public bool IsRunning
+    {
+        get => _isRunning;
+        set => this.RaiseAndSetIfChanged(ref _isRunning, value);
+    }
+    
+    private bool _isHidden;
+    public bool IsHidden
+    {
+        get => _isHidden;
+        set => this.RaiseAndSetIfChanged(ref _isHidden, value);
+    }
+    
+    private bool _hasCustomSettings;
+    public bool HasCustomSettings
+    {
+        get => _hasCustomSettings;
+        set => this.RaiseAndSetIfChanged(ref _hasCustomSettings, value);
+    }
+
+    private AppSpecificSettings _customSettings = new();
+    public AppSpecificSettings CustomSettings
+    {
+        get => _customSettings;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _customSettings, value);
+            // Save settings when custom settings are updated
+            if (_settings != null && HasCustomSettings)
+            {
+                _settings.AppSettings[ExecutablePath] = value;
+                _settings.Save();
+            }
+        }
+    }
+    
+    // New properties for save backup functionality
+    private DateTime _lastBackupTime = DateTime.MinValue;
+    public DateTime LastBackupTime
+    {
+        get => _lastBackupTime;
+        set => this.RaiseAndSetIfChanged(ref _lastBackupTime, value);
+    }
+    
+    private ObservableCollection<SaveBackupInfo> _backupHistory = new();
+    public ObservableCollection<SaveBackupInfo> BackupHistory
+    {
+        get => _backupHistory;
+        set => this.RaiseAndSetIfChanged(ref _backupHistory, value);
+    }
+    
+    private bool _autoBackupEnabled = true;
+    public bool AutoBackupEnabled
+    {
+        get => _hasCustomSettings ? _customSettings.AutoSaveEnabled : _autoBackupEnabled;
+        set
+        {
+            if (_hasCustomSettings)
+            {
+                _customSettings.AutoSaveEnabled = value;
+            }
+            else
+            {
+                this.RaiseAndSetIfChanged(ref _autoBackupEnabled, value);
+            }
+        }
+    }
+
+    // Method to refresh time displays in UI
+    public void RefreshTimeDisplays()
+    {
+        // Trigger property change notifications for time properties
+        this.RaisePropertyChanged(nameof(LastUsed));
+        this.RaisePropertyChanged(nameof(LastBackupTime));
+    }
+}
+
+// Save backup info class for tracking backups
+public class SaveBackupInfo : ReactiveObject
+{
+    private string _backupPath = string.Empty;
+    public string BackupPath
+    {
+        get => _backupPath;
+        set => this.RaiseAndSetIfChanged(ref _backupPath, value);
+    }
+    
+    private DateTime _timestamp = DateTime.Now;
+    public DateTime Timestamp
+    {
+        get => _timestamp;
+        set => this.RaiseAndSetIfChanged(ref _timestamp, value);
+    }
+    
+    private string _description = string.Empty;
+    public string Description
+    {
+        get => _description;
+        set => this.RaiseAndSetIfChanged(ref _description, value);
+    }
+    
+    private bool _isAutoBackup = true;
+    public bool IsAutoBackup
+    {
+        get => _isAutoBackup;
+        set => this.RaiseAndSetIfChanged(ref _isAutoBackup, value);
+    }
+
+    // Color code property for different save types
+    public string ColorCode
+    {
+        get
+        {
+            // Check if this is a start save by looking at the description
+            if (Description.StartsWith("Start Save"))
+                return "#dbaf1f"; // The requested color code for Start Save
+            
+            if (IsAutoBackup)
+                return "#4287f5"; // A blue color for auto saves
+                
+            if (Description.StartsWith("Forced save"))
+                return "#42f57b"; // A green color for manual saves
+                
+            // Default color
+            return "#808080";
+        }
+    }
+
+    // Method to refresh time display
+    public void RefreshTimeDisplay()
+    {
+        // Trigger property change notification for timestamp
+        this.RaisePropertyChanged(nameof(Timestamp));
+    }
+}

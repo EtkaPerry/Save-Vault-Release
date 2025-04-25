@@ -1,0 +1,1755 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SaveVaultApp.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+        xmlns:utils="using:SaveVaultApp.Utilities"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        x:Class="SaveVaultApp.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Icon="/Assets/logo.ico"
+        Title="SaveVaultApp"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="NoChrome"
+        ExtendClientAreaTitleBarHeightHint="-1"
+        Background="{DynamicResource PanelBackground}">
+
+    <Window.Styles>
+        <Style Selector="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextColor}" />
+        </Style>
+    </Window.Styles>
+
+    <Design.DataContext>
+        <!-- This only sets the DataContext for the previewer in an IDE,
+             to set the actual DataContext for runtime, set the DataContext property in code (look at App.axaml.cs) -->
+        <vm:MainWindowViewModel/>
+    </Design.DataContext>
+
+    <DockPanel>
+        <!-- Custom Title Bar -->
+        <Grid DockPanel.Dock="Top" Height="30" Background="{DynamicResource TitleBarBackground}" Name="TitleBar">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            
+            <!-- Menu -->
+            <Menu Grid.Column="0" Background="Transparent" Height="30">
+                <MenuItem Header="File">
+                    <MenuItem Header="Exit" Command="{Binding ExitApplicationCommand}"/>
+                </MenuItem>
+                <MenuItem Header="Options" Name="OptionsMenuItem"/>
+            </Menu>
+            
+            <!-- Window Title - This area will be used for window dragging -->
+            <Border Grid.Column="1" Name="DragRegion" Background="Transparent">
+                <TextBlock Text="Save Vault" VerticalAlignment="Center" HorizontalAlignment="Center" />
+            </Border>
+            
+            <!-- Window Control Buttons -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Width="45" Height="30" Background="Transparent" BorderThickness="0" Padding="0" Name="MinimizeButton">
+                    <Path Data="M 0,0 H 10" Stroke="{DynamicResource TextColor}" StrokeThickness="1" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                </Button>
+                <Button Width="45" Height="30" Background="Transparent" BorderThickness="0" Padding="0" Name="MaximizeButton">
+                    <Path Data="M 0,0 H 10 V 10 H 0 Z" Stroke="{DynamicResource TextColor}" StrokeThickness="1" Fill="Transparent" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                </Button>
+                <Button Width="45" Height="30" Background="Transparent" BorderThickness="0" Padding="0" Name="CloseButton">
+                    <Path Data="M 0,0 L 10,10 M 0,10 L 10,0" Stroke="{DynamicResource TextColor}" StrokeThickness="1" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- Status Bar -->
+        <Grid DockPanel.Dock="Bottom" Background="{DynamicResource StatusBarBackground}" Height="22">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            
+            <TextBlock Grid.Column="0" 
+                       Text="{Binding StatusMessage}" 
+                       VerticalAlignment="Center" 
+                       Margin="10,0,0,0" 
+                       FontSize="11"/>
+                       
+
+            <!-- Running Apps Indicator -->
+            <StackPanel Grid.Column="1" 
+                       Orientation="Horizontal"
+                       HorizontalAlignment="Right"
+                       Margin="0,0,10,0">
+                <TextBlock Text="Running:" 
+                          Foreground="{DynamicResource SecondaryTextColor}" 
+                          VerticalAlignment="Center" 
+                          Margin="0,0,5,0"
+                          FontSize="11"/>
+                <ItemsControl ItemsSource="{Binding RunningApps}" 
+                             VerticalAlignment="Center">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="5" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="{DynamicResource ListItemBackground}" 
+                                   CornerRadius="3" 
+                                   Padding="4,1">
+                                <TextBlock Text="{Binding Name}" 
+                                          Foreground="#FF9800"
+                                          FontSize="10" />
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Grid>
+
+        <!-- Main Content -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="20*" />
+                <ColumnDefinition Width="80*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left Panel -->
+            <Border Grid.Column="0" Background="{DynamicResource SidebarBackground}" Padding="10">
+                <DockPanel>                    <StackPanel DockPanel.Dock="Top">                            <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>                            <Button Grid.Column="0" 
+                                    Background="{DynamicResource ListItemBackground}"
+                                    Width="32"
+                                    Height="32"
+                                    Padding="4"
+                                    Margin="0,0,5,0"
+                                    ToolTip.Tip="Add New"
+                                    Command="{Binding ShowAddAppPanelCommand}">
+                                <Image Source="{DynamicResource AddIconSource}" Width="16" Height="16"/>
+                            </Button>                            
+                            <TextBox Grid.Column="1" 
+                                    Margin="0,0,5,0"
+                                    Watermark="Search apps..."
+                                    Text="{Binding SearchText}"
+                                    Background="{DynamicResource TextBoxBackground}">
+                                <TextBox.InnerRightContent>                                    <Button Width="14" 
+                                            Height="12" 
+                                            Margin="0,0,5,0"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Padding="0"
+                                            IsVisible="{Binding SearchText, Converter={StaticResource StringNotEmptyConverter}}"
+                                            Command="{Binding ClearSearchCommand}">
+                                        <Image Source="{DynamicResource CloseIconSource}"/>
+                                    </Button>
+                                </TextBox.InnerRightContent>
+                            </TextBox>
+                            <Button Grid.Column="2" 
+                                    Background="{DynamicResource ListItemBackground}"
+                                    Width="32"
+                                    Height="32"
+                                    Padding="4"
+                                    ToolTip.Tip="Sort Options">
+                                <Button.Flyout>
+                                    <MenuFlyout Placement="Bottom">
+                                        <MenuItem Header="A-Z" 
+                                                  Command="{Binding SetSortOptionCommand}" 
+                                                  CommandParameter="A-Z"
+                                                  IsChecked="{Binding SelectedSortOption, Converter={x:Static utils:StringCompareConverter.Instance}, ConverterParameter='A-Z'}" />
+                                        <MenuItem Header="Z-A" 
+                                                  Command="{Binding SetSortOptionCommand}" 
+                                                  CommandParameter="Z-A"
+                                                  IsChecked="{Binding SelectedSortOption, Converter={x:Static utils:StringCompareConverter.Instance}, ConverterParameter='Z-A'}" />
+                                        <MenuItem Header="Last Used" 
+                                                  Command="{Binding SetSortOptionCommand}" 
+                                                  CommandParameter="Last Used"
+                                                  IsChecked="{Binding SelectedSortOption, Converter={x:Static utils:StringCompareConverter.Instance}, ConverterParameter='Last Used'}" />
+                                    </MenuFlyout>
+                                </Button.Flyout>
+                                <!-- Use a theme-aware image source -->
+                                <Image Source="{DynamicResource SortIconSource}" />
+                            </Button>
+                        </Grid>
+                        <TextBlock Text="Installed Applications" 
+                                 Margin="0,0,0,10" 
+                                 FontWeight="Bold"/>
+                    </StackPanel>
+
+                    <!-- Loading indicator -->
+                    <Grid DockPanel.Dock="Top" IsVisible="{Binding IsLoading}">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <ProgressBar IsIndeterminate="True" Width="100" Height="4" Margin="0,0,0,10"/>
+                            <TextBlock Text="{Binding StatusMessage}" HorizontalAlignment="Center"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <ScrollViewer DockPanel.Dock="Top" 
+                                 HorizontalScrollBarVisibility="Disabled"
+                                 VerticalScrollBarVisibility="Visible"
+                                 Margin="0,0,2,0">
+                        <ScrollViewer.Styles>
+                            <Style Selector="ScrollBar">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="Opacity" Value="0.4"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                                <Setter Property="AllowAutoHide" Value="False"/>
+                                <Setter Property="Transitions">
+                                    <Transitions>
+                                        <DoubleTransition Property="Opacity" Duration="0:0:0.2"/>
+                                    </Transitions>
+                                </Setter>
+                            </Style>
+                            <Style Selector="ScrollBar:vertical">
+                                <Setter Property="Width" Value="8"/>
+                            </Style>
+                            <Style Selector="ScrollBar:pointerover">
+                                <Setter Property="Opacity" Value="0.8"/>
+                            </Style>
+                            <Style Selector="ScrollBar /template/ RepeatButton">
+                                <Setter Property="Background" Value="Transparent"/>
+                            </Style>
+                            <Style Selector="ScrollBar /template/ Thumb">
+                                <Setter Property="Background" Value="#555555"/>
+                                <Setter Property="MinHeight" Value="40"/>
+                                <Setter Property="CornerRadius" Value="4"/>
+                            </Style>
+                            <Style Selector="ScrollBar /template/ Thumb:pointerover">
+                                <Setter Property="Background" Value="#777777"/>
+                            </Style>
+                            <Style Selector="ScrollBar /template/ Thumb:pressed">
+                                <Setter Property="Background" Value="#FF9800"/>
+                            </Style>
+                        </ScrollViewer.Styles>
+                        
+                        <StackPanel Margin="0,0,6,0">
+                            <!-- Regular apps list -->
+                            <ListBox ItemsSource="{Binding InstalledApps}"
+                                    SelectedItem="{Binding SelectedApp}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Margin="0,0,0,0"
+                                    IsEnabled="{Binding !IsLoading}"
+                                    IsVisible="{Binding !IsLoading}">
+                                <ListBox.Styles>
+                                    <Style Selector="ListBoxItem">
+                                        <Setter Property="Padding" Value="10,5"/>
+                                        <Setter Property="Margin" Value="0,2"/>
+                                        <Setter Property="Background" Value="{DynamicResource ListItemBackground}"/>
+                                        <Setter Property="CornerRadius" Value="4"/>
+                                    </Style>
+                                    <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                                        <Setter Property="Background" Value="{DynamicResource ListItemBackgroundHover}"/>
+                                    </Style>
+                                    <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                        <Setter Property="Background" Value="#FF9800"/>
+                                    </Style>
+                                </ListBox.Styles>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            
+                                            <!-- Running indicator -->
+                                            <Ellipse Grid.Column="0" 
+                                                    Width="8" 
+                                                    Height="8" 
+                                                    Margin="0,0,5,0" 
+                                                    VerticalAlignment="Center"
+                                                    Fill="#4CAF50"
+                                                    IsVisible="{Binding IsRunning}"/>
+                                            
+                                            <TextBlock Grid.Column="1" 
+                                                      Text="{Binding Name}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <!-- Steam-style Hidden Games separator with collapse button -->
+                            <Grid IsVisible="{Binding HiddenGames.Count}"
+                                  Margin="0,15,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <Button Grid.Column="0"
+                                        Command="{Binding ToggleHiddenGamesVisibilityCommand}"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Padding="0,0,5,0"
+                                        VerticalAlignment="Center">
+                                    <PathIcon Height="8" 
+                                            Width="8"
+                                            Data="M 0,0 L 4,4 L 8,0">
+                                        <PathIcon.RenderTransform>
+                                            <RotateTransform Angle="{Binding IsHiddenGamesExpanded, Converter={x:Static utils:BoolToAngleConverter.Instance}}"/>
+                                        </PathIcon.RenderTransform>
+                                    </PathIcon>
+                                </Button>
+                                
+                                <TextBlock Text="HIDDEN GAMES" 
+                                         Grid.Column="1"
+                                         FontSize="11"
+                                         FontWeight="SemiBold"
+                                         Foreground="{DynamicResource SecondaryTextColor}"
+                                         Margin="0,0,10,0"
+                                         VerticalAlignment="Center"/>
+                                         
+                                <Border Grid.Column="2"
+                                        Background="{DynamicResource DividerColor}"
+                                        Height="1"
+                                        VerticalAlignment="Center"/>
+                            </Grid>
+
+                            <!-- Hidden games list -->
+                            <ListBox ItemsSource="{Binding HiddenGames}"
+                                    SelectedItem="{Binding SelectedApp}"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    IsEnabled="{Binding !IsLoading}"
+                                    IsVisible="{Binding IsHiddenGamesExpanded}">
+                                <ListBox.Styles>
+                                    <Style Selector="ListBoxItem">
+                                        <Setter Property="Padding" Value="10,5"/>
+                                        <Setter Property="Margin" Value="0,2"/>
+                                        <Setter Property="Background" Value="{DynamicResource ListItemBackground}"/>
+                                        <Setter Property="CornerRadius" Value="4"/>
+                                        <Setter Property="Opacity" Value="0.8"/>
+                                    </Style>
+                                    <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                                        <Setter Property="Background" Value="{DynamicResource ListItemBackgroundHover}"/>
+                                        <Setter Property="Opacity" Value="0.9"/>
+                                    </Style>
+                                    <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                        <Setter Property="Background" Value="#FF9800"/>
+                                        <Setter Property="Opacity" Value="1.0"/>
+                                    </Style>
+                                </ListBox.Styles>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            
+                                            <!-- Running indicator -->
+                                            <Ellipse Grid.Column="0" 
+                                                    Width="8" 
+                                                    Height="8" 
+                                                    Margin="0,0,5,0" 
+                                                    VerticalAlignment="Center"
+                                                    Fill="#4CAF50"
+                                                    IsVisible="{Binding IsRunning}"/>
+                                            
+                                            <TextBlock Grid.Column="1" 
+                                                      Text="{Binding Name}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <!-- Right Panel (80%) -->
+            <Border Grid.Column="1" Background="{DynamicResource MainBackground}" Padding="0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                      <!-- Top Action Bar -->
+                    <Border Grid.Row="0" Background="{DynamicResource TitleBarBackground}" Padding="20,0" Height="50">
+                        <Grid VerticalAlignment="Center">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/> <!-- Left buttons section -->
+                                <ColumnDefinition Width="*"/> <!-- Spacer -->
+                                <ColumnDefinition Width="Auto"/> <!-- Right profile section -->
+                            </Grid.ColumnDefinitions>                            <!-- Action buttons on the left -->
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Command="{Binding LaunchAppCommand}"
+                                        IsEnabled="{Binding !!SelectedApp}"
+                                        Background="#FF9800"
+                                        Foreground="{DynamicResource TextColor}"
+                                        Padding="15,6"
+                                        Height="32"
+                                        CornerRadius="4"
+                                        VerticalAlignment="Center"
+                                        HorizontalAlignment="Left">
+                                    <StackPanel Orientation="Horizontal">
+                                        <PathIcon Data="M0,0 L8,8 L0,16 M2,0 L10,8 L2,16" Height="12" Width="12" Margin="0,0,5,0"/>
+                                        <TextBlock Text="Launch"/>
+                                    </StackPanel>
+                                </Button>
+
+                                <!-- Toggle between Edit and Confirm buttons based on IsEditing state -->
+                                <Button Command="{Binding EditAppCommand}"
+                                        IsEnabled="{Binding !!SelectedApp}"
+                                        Background="Transparent"
+                                        BorderThickness="1"
+                                        BorderBrush="#FF9800"
+                                        Foreground="#FF9800"
+                                        Padding="10,8"
+                                        CornerRadius="4"
+                                        Margin="10,0,0,0"
+                                        IsVisible="{Binding !IsEditing}">
+                                    <PathIcon Data="M14.06,9L15,9.94L5.92,19H5V18.08L14.06,9M17.66,3C17.41,3 17.15,3.1 16.96,3.29L15.13,5.12L18.88,8.87L20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18.17,3.09 17.92,3 17.66,3M14.06,6.19L3,17.25V21H6.75L17.81,9.94L14.06,6.19Z" Height="16" Width="16"/>
+                                </Button>
+                                
+                                <!-- Save Button -->
+                                <Button Command="{Binding SaveAllCommand}"
+                                        IsEnabled="{Binding !!SelectedApp}"
+                                        Background="Transparent"
+                                        BorderThickness="1"
+                                        BorderBrush="#4CAF50"
+                                        Foreground="#4CAF50"
+                                        Padding="10,8"
+                                        CornerRadius="4"
+                                        Margin="10,0,0,0"
+                                        IsVisible="{Binding IsEditing}">
+                                    <PathIcon Data="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z" Height="16" Width="16" Foreground="#4CAF50"/>
+                                </Button>
+                                
+                                <!-- Cancel Button -->
+                                <Button Command="{Binding CancelAllCommand}"
+                                        IsEnabled="{Binding !!SelectedApp}"
+                                        Background="Transparent"
+                                        BorderThickness="1"
+                                        BorderBrush="#f44336"
+                                        Foreground="#f44336"
+                                        Padding="10,8"
+                                        CornerRadius="4"
+                                        Margin="10,0,0,0"
+                                        IsVisible="{Binding IsEditing}">
+                                    <PathIcon Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z" Height="16" Width="16" Foreground="#f44336"/>
+                                </Button>
+
+                                <!-- Hide/Show Button -->
+                                <Button Command="{Binding ToggleAppVisibilityCommand}"
+                                        IsEnabled="{Binding !!SelectedApp}"
+                                        Background="#9C27B0"
+                                        Foreground="{DynamicResource TextColor}"
+                                        Padding="10,8"
+                                        CornerRadius="4"
+                                        Margin="10,0,0,0"
+                                        IsVisible="{Binding IsEditing}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Hide" IsVisible="{Binding !SelectedApp.IsHidden}" />
+                                        <TextBlock Text="Show" IsVisible="{Binding SelectedApp.IsHidden}" />
+                                    </StackPanel>
+                                </Button>                            </StackPanel>                              <!-- Enhanced Profile dropdown on the right -->
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">                                <!-- Login button - shown when not logged in -->
+                                <Button Command="{Binding ShowLoginPopupCommand}"
+                                        BorderThickness="1"
+                                        BorderBrush="#FF9800"
+                                        Background="Transparent"
+                                        Foreground="#FF9800"
+                                        FontWeight="SemiBold"
+                                        Padding="10,4"
+                                        Height="32"
+                                        CornerRadius="6"
+                                        VerticalAlignment="Center"
+                                        IsVisible="{Binding !IsLoggedIn}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <PathIcon Data="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z" 
+                                                 Width="16" Height="16" 
+                                                 Foreground="#FF9800"/>
+                                        <TextBlock Text="Sign In" 
+                                                  VerticalAlignment="Center" 
+                                                  FontWeight="Medium"
+                                                  Foreground="#FF9800"/>
+                                    </StackPanel>
+                                </Button>
+                                
+                                <!-- Profile button - only shown when logged in -->
+                                <Button Background="Transparent"
+                                        BorderThickness="0"
+                                        Padding="8,6"
+                                        CornerRadius="4"
+                                        Command="{Binding ShowProfileCommand}"
+                                        HorizontalContentAlignment="Right"
+                                        VerticalContentAlignment="Center" 
+                                        IsVisible="{Binding IsLoggedIn}"
+                                        Cursor="Hand">
+                                    
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding LoginStatusText}" 
+                                                  VerticalAlignment="Center" 
+                                                  FontWeight="Medium"
+                                                  Foreground="{DynamicResource TextColor}"/>
+                                        <!-- Profile Avatar with Border -->
+                                        <Border Width="32" Height="32" 
+                                              CornerRadius="16" 
+                                              BorderBrush="{DynamicResource DividerColor}"
+                                              BorderThickness="1"
+                                              ClipToBounds="True">
+                                            <Panel>
+                                                <!-- Background Circle -->
+                                                <Ellipse Width="32" Height="32" 
+                                                       Fill="{DynamicResource PanelBackground}"/>
+                                                
+                                                <!-- User Icon (shown when not logged in) -->
+                                                <PathIcon Data="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z" 
+                                                         Width="18" Height="18"
+                                                         Foreground="{DynamicResource SecondaryTextColor}"
+                                                         IsVisible="{Binding !IsLoggedIn}"/>
+                                                
+                                                <!-- First Letter of Username (shown when logged in) -->
+                                                <TextBlock Text="{Binding LoggedInInitial}" 
+                                                         FontWeight="SemiBold" 
+                                                         FontSize="16"
+                                                         Foreground="#FF9800"
+                                                         HorizontalAlignment="Center"
+                                                         VerticalAlignment="Center"
+                                                         IsVisible="{Binding IsLoggedIn}"/>
+                                            </Panel>
+                                        </Border>
+                                    </StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    
+                    <!-- Main Content Area -->
+                    <Grid Grid.Row="1">
+                        <!-- State-based content switching -->
+                        <Grid.Resources>
+                            <Thickness x:Key="NoSelectionMargin">0,40,0,0</Thickness>
+                        </Grid.Resources>
+
+                        <!-- No Selection State -->
+                        <StackPanel IsVisible="{Binding !SelectedApp}"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Spacing="20"
+                                  Margin="{StaticResource NoSelectionMargin}">
+                            <TextBlock Text="Select an application from the list"
+                                     Foreground="{DynamicResource SecondaryTextColor}"
+                                     FontSize="16"
+                                     HorizontalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- App Details State -->
+                        <Grid IsVisible="{Binding !!SelectedApp}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="50*"/>
+                                <ColumnDefinition Width="50*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="50*"/>
+                                <RowDefinition Height="50*"/>
+                            </Grid.RowDefinitions>
+                            
+                            <!-- Top Left Panel - App Details -->
+                            <Border Grid.Column="0" Grid.Row="0" Background="{DynamicResource PanelBackground}" Margin="1">
+                                <ScrollViewer Margin="20" VerticalScrollBarVisibility="Auto">
+                                    <StackPanel>
+                                        <TextBlock Text="Application Details" 
+                                                FontWeight="Bold" 
+                                                FontSize="16"
+                                                Margin="0,0,0,15"/>
+                                        
+                                        <!-- Editable application name -->
+                                        <Grid Margin="0,0,0,5">
+                                            <TextBlock Text="{Binding SelectedApp.Name}" 
+                                                     FontSize="16" 
+                                                     IsVisible="{Binding !IsEditingName}"/>
+                                            <TextBox Text="{Binding EditableName}" 
+                                                    FontSize="16"
+                                                    Background="{DynamicResource TextBoxBackground}"
+                                                    IsVisible="{Binding IsEditingName}"
+                                                    KeyDown="OnNameEditKeyDown"
+                                                    TextWrapping="Wrap"
+                                                    AcceptsReturn="False"
+                                                    Height="NaN"
+                                                    MinHeight="24"
+                                                    MaxWidth="400"
+                                                    HorizontalAlignment="Left"
+                                                    VerticalAlignment="Top">
+                                                <TextBox.Styles>
+                                                    <Style Selector="TextBox">
+                                                        <Setter Property="MinWidth" Value="150" />
+                                                        <Setter Property="MaxHeight" Value="100" />
+                                                    </Style>
+                                                </TextBox.Styles>
+                                            </TextBox>
+                                        </Grid>
+                                        
+                                        <TextBlock Text="Executable Path:" FontWeight="Bold" Margin="0,10,0,5"/>
+                                        <TextBlock Text="{Binding SelectedApp.ExecutablePath}" TextWrapping="Wrap"/>
+                                        <TextBlock Text="Installation Path:" FontWeight="Bold" Margin="0,10,0,5"/>
+                                        <TextBlock Text="{Binding SelectedApp.Path}" TextWrapping="Wrap"/>
+                                        <TextBlock Text="Save Path:" FontWeight="Bold" Margin="0,10,0,0"/>
+                                        <Grid>
+                                            <TextBlock Text="{Binding SelectedApp.SavePath}" 
+                                                     TextWrapping="Wrap" 
+                                                     IsVisible="{Binding !IsEditingSavePath}"/>
+                                            
+                                            <!-- Edit mode -->
+                                            <StackPanel Orientation="Horizontal" IsVisible="{Binding IsEditingSavePath}">
+                                                <TextBox Text="{Binding EditableSavePath}" 
+                                                        Background="{DynamicResource TextBoxBackground}"
+                                                        KeyDown="OnSavePathEditKeyDown"
+                                                        TextWrapping="Wrap"
+                                                        AcceptsReturn="False"
+                                                        Height="NaN"
+                                                        MinHeight="24"
+                                                        Width="250"
+                                                        VerticalAlignment="Top">
+                                                    <TextBox.Styles>
+                                                        <Style Selector="TextBox">
+                                                            <Setter Property="MinWidth" Value="200" />
+                                                            <Setter Property="MaxHeight" Value="100" />
+                                                        </Style>
+                                                    </TextBox.Styles>
+                                                </TextBox>
+                                                
+                                                <Button Command="{Binding BrowseForSavePathCommand}"
+                                                        VerticalAlignment="Top"
+                                                        Background="{DynamicResource ListItemBackground}"
+                                                        BorderThickness="1"
+                                                        BorderBrush="#FF9800"
+                                                        Padding="5,2"
+                                                        Margin="5,0,0,0"
+                                                        CornerRadius="4"
+                                                        Height="26">
+                                                    <PathIcon Data="M13 19C13 19.7 13.13 20.37 13.35 21H5C3.9 21 3 20.11 3 19V5C3 3.9 3.9 3 5 3H9.18C9.6 3 10 3.18 10.29 3.46L11.71 4.89C11.89 5.07 12 5.33 12 5.59V7H9V9H12.09C12.47 7.9 13.19 6.97 14.15 6.32C14.06 6.13 14 5.92 14 5.59V5.59C14 4.79 13.69 4.03 13.14 3.5L11.71 2.07C11.32 1.67 10.77 1.5 10.21 1.5H5C2.79 1.5 1 3.29 1 5.5V19C1 21.21 2.79 23 5 23H14.54C13.59 22.03 13 20.58 13 19M16.5 16.25V19.75L18 18.25L19.5 19.75V16.25H16.5M19.5 14C17.84 14 16.5 15.34 16.5 17V22L18 21L19.5 22V17C19.5 15.34 18.16 14 16.5 14H19.5Z" Height="16" Width="16"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+                            
+                            <!-- Top Right Panel - Custom Settings -->
+                            <Border Grid.Column="1" Grid.Row="0" Background="{DynamicResource PanelBackground}" Margin="1">
+                                <ScrollViewer Margin="20" VerticalScrollBarVisibility="Auto">
+                                    <StackPanel>
+                                        <!-- Custom Settings Section -->
+                                        <Grid Margin="0,0,0,15" IsVisible="{Binding !!SelectedApp}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            
+                                            <TextBlock Text="Use Custom Settings" 
+                                                     FontWeight="Bold" 
+                                                     FontSize="16"
+                                                     Grid.Column="0"
+                                                     VerticalAlignment="Center"/>
+                                                     
+                                            <ToggleSwitch Grid.Column="2"
+                                                        IsChecked="{Binding SelectedApp.HasCustomSettings, Mode=OneWay}"
+                                                        Command="{Binding ToggleCustomSettingsCommand}"
+                                                        HorizontalAlignment="Right"
+                                                        Margin="0,0,0,0"/>
+                                        </Grid>
+                                        
+                                        <!-- Custom Settings Panel -->
+                                        <Border Background="{DynamicResource SidebarBackground}" 
+                                               Padding="15"
+                                               Margin="0,0,0,15"
+                                               IsVisible="{Binding SelectedApp.HasCustomSettings}">
+                                            <StackPanel>
+                                                <!-- Auto-save settings (not in a box, directly in the StackPanel) -->
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                                    <TextBlock Text="Auto-save Interval:" 
+                                                             VerticalAlignment="Center"/>
+                                                    <NumericUpDown Value="{Binding SelectedApp.CustomSettings.AutoSaveInterval}"
+                                                                 Minimum="1"
+                                                                 Maximum="120"
+                                                                 Increment="1"
+                                                                 Width="100"
+                                                                 Margin="10,0,0,0"/>
+                                                    <TextBlock Text="minutes" 
+                                                             VerticalAlignment="Center"
+                                                             Margin="10,0,0,0"/>
+                                                </StackPanel>
+
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                                    <TextBlock Text="Max auto-saves:" 
+                                                             VerticalAlignment="Center"/>
+                                                    <NumericUpDown Value="{Binding SelectedApp.CustomSettings.MaxAutoSaves}"
+                                                                 Minimum="1"
+                                                                 Maximum="50"
+                                                                 Increment="1"
+                                                                 Width="100"
+                                                                 Margin="10,0,0,0"/>
+                                                    <TextBlock Text="backups" 
+                                                             VerticalAlignment="Center"
+                                                             Margin="10,0,0,0"/>
+                                                </StackPanel>
+                                                
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                                    <TextBlock Text="Max start-saves:" 
+                                                             VerticalAlignment="Center"/>
+                                                    <NumericUpDown Value="{Binding SelectedApp.CustomSettings.MaxStartSaves}"
+                                                                 Minimum="1"
+                                                                 Maximum="20"
+                                                                 Increment="1"
+                                                                 Width="100"
+                                                                 Margin="10,0,0,0"/>
+                                                    <TextBlock Text="backups" 
+                                                             VerticalAlignment="Center"
+                                                             Margin="10,0,0,0"/>
+                                                </StackPanel>
+
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                                    <TextBlock Text="Auto-save:" 
+                                                             VerticalAlignment="Center"
+                                                             Width="150"/>
+                                                    <ToggleSwitch IsChecked="{Binding SelectedApp.CustomSettings.AutoSaveEnabled, Mode=TwoWay}"
+                                                                OnContent="Enabled" 
+                                                                OffContent="Disabled"/>
+                                                </StackPanel>
+                                                
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="Create save on launch:" 
+                                                             VerticalAlignment="Center"
+                                                             Width="150"/>
+                                                    <ToggleSwitch IsChecked="{Binding SelectedApp.CustomSettings.StartSaveEnabled, Mode=TwoWay}"
+                                                                OnContent="Enabled" 
+                                                                OffContent="Disabled"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+  
+                                        <TextBlock Text="Using global application settings"
+                                               Foreground="{DynamicResource SecondaryTextColor}"
+                                               Margin="0,0,0,10"
+                                               IsVisible="{Binding !SelectedApp.HasCustomSettings}"/>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+                            
+                            <!-- Bottom Panel - Save Backups (spans both columns) -->
+                            <Border Grid.Column="0" Grid.Row="1" Grid.ColumnSpan="2" Background="{DynamicResource PanelBackground}" Margin="1">
+                                <Grid Margin="20">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Save Backups Header with Next Save button -->
+                                    <Grid Grid.Row="0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <TextBlock Grid.Column="0" 
+                                                  Text="Save Backups" 
+                                                  FontWeight="Bold" 
+                                                  FontSize="16"
+                                                  VerticalAlignment="Center"/>
+
+                                        <!-- Next Save button -->
+                                        <Button Grid.Column="2"
+                                                Command="{Binding SaveNowCommand}"
+                                                Background="{DynamicResource ListItemBackground}"
+                                                BorderThickness="1"
+                                                BorderBrush="#FF9800"
+                                                Padding="10,5"
+                                                CornerRadius="4"
+                                                Margin="5,0,0,0"
+                                                PointerEntered="NextSaveButton_PointerEntered"
+                                                PointerExited="NextSaveButton_PointerExited">
+                                            <TextBlock FontWeight="SemiBold">
+                                                <TextBlock.Text>
+                                                    <MultiBinding Converter="{x:Static utils:BoolToNextSaveTextConverter.Instance}">
+                                                        <Binding Path="IsHoveringNextSave"/>
+                                                        <Binding Path="NextSaveText"/>
+                                                    </MultiBinding>
+                                                </TextBlock.Text>
+                                            </TextBlock>
+                                            <Button.Styles>
+                                                <Style Selector="Button:pointerover">
+                                                    <Setter Property="Background" Value="#FF9800"/>
+                                                    <Setter Property="BorderBrush" Value="#FF9800"/>
+                                                </Style>
+                                            </Button.Styles>
+                                        </Button>
+                                    </Grid>
+
+                                    <!-- Backup History Grid -->
+                                    <Border Grid.Row="1" Background="{DynamicResource SidebarBackground}">
+                                        <Grid>
+                                            <!-- Column Headers -->
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="*"/>
+                                            </Grid.RowDefinitions>
+                                            
+                                            <!-- Headers -->
+                                            <Grid Grid.Row="0" Background="{DynamicResource ListItemBackground}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="100"/>
+                                                    <ColumnDefinition Width="120"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                
+                                                <TextBlock Text="Save Type" Grid.Column="0" FontWeight="SemiBold" Margin="10,8"/>
+                                                <TextBlock Text="Time Passed" Grid.Column="1" FontWeight="SemiBold" Margin="10,8"/>
+                                                <TextBlock Text="Description" Grid.Column="2" FontWeight="SemiBold" Margin="10,8"/>
+                                                <TextBlock Text="Actions" Grid.Column="3" FontWeight="SemiBold" Margin="10,8"/>
+                                            </Grid>
+                                            
+                                            <!-- Backup Items -->
+                                            <ListBox Grid.Row="1" 
+                                                    ItemsSource="{Binding SelectedApp.BackupHistory}" 
+                                                    Background="Transparent"
+                                                    BorderThickness="0">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Margin="0,5">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="100"/>
+                                                                <ColumnDefinition Width="120"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="Auto"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            
+                                                            <!-- Save Type -->
+                                                            <TextBlock Grid.Column="0">
+                                                                <TextBlock.Text>
+                                                                    <Binding Path="Description">
+                                                                        <Binding.Converter>
+                                                                            <x:Static Member="utils:SaveTypeConverter.Instance"/>
+                                                                        </Binding.Converter>
+                                                                    </Binding>
+                                                                </TextBlock.Text>
+                                                                <TextBlock.Foreground>
+                                                                    <Binding Path="ColorCode"/>
+                                                                </TextBlock.Foreground>
+                                                            </TextBlock>
+                                                            
+                                                            <!-- Time Passed -->
+                                                            <TextBlock Grid.Column="1" 
+                                                                       Text="{Binding Timestamp, Converter={x:Static utils:DateTimeToTimeAgoConverter.Instance}}"/>
+                                                            
+                                                            <!-- Description -->
+                                                            <TextBlock Grid.Column="2" 
+                                                                       Text="{Binding Description}"/>
+                                                            
+                                                            <!-- Action Buttons -->
+                                                            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="5">
+                                                                <!-- Open Folder Button -->
+                                                                <Button Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).OpenBackupFolderCommand}"
+                                                                        CommandParameter="{Binding}"
+                                                                        Classes="icon-button"
+                                                                        ToolTip.Tip="Open backup folder">
+                                                                    <PathIcon Data="M20,18H4V8H20M20,6H12L10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6Z"
+                                                                             Foreground="#2196F3"
+                                                                             Width="16"
+                                                                             Height="16"/>
+                                                                </Button>
+                                                                
+                                                                <!-- Restore Button -->
+                                                                <Button Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).RestoreBackupCommand}"
+                                                                        CommandParameter="{Binding}"
+                                                                        Classes="icon-button"
+                                                                        ToolTip.Tip="Restore this save">
+                                                                    <PathIcon Data="M13,3L11,5L13,7V3M1,9L3,11L5,9H1M9,5L7,3V7L9,5M17,11L15,9H19L17,11M5,13L3,15L1,13H5M19,13H15L17,15L19,13M12,17L14,19H10L12,17M12,8A4,4 0 0,0 8,12A4,4 0 0,0 12,16A4,4 0 0,0 16,12A4,4 0 0,0 12,8Z" 
+                                                                             Foreground="#FF9800"
+                                                                             Width="16"
+                                                                             Height="16"/>
+                                                                </Button>
+                                                                
+                                                                <!-- Delete Button -->
+                                                                <Button Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).DeleteBackupCommand}"
+                                                                        CommandParameter="{Binding}"
+                                                                        Classes="icon-button"
+                                                                        ToolTip.Tip="Delete this save">
+                                                                    <PathIcon Data="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"
+                                                                             Foreground="#f44336"
+                                                                             Width="16"
+                                                                             Height="16"/>
+                                                                </Button>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                                <ListBox.Styles>
+                                                    <Style Selector="ListBoxItem">
+                                                        <Setter Property="Padding" Value="10,5"/>
+                                                        <Setter Property="Background" Value="{DynamicResource ListItemBackground}"/>
+                                                        <Setter Property="CornerRadius" Value="4"/>
+                                                        <Setter Property="Margin" Value="0,2"/>
+                                                    </Style>
+                                                    <Style Selector="Button.icon-button">
+                                                        <Setter Property="Background" Value="Transparent"/>
+                                                        <Setter Property="BorderThickness" Value="0"/>
+                                                        <Setter Property="Padding" Value="5"/>
+                                                        <Setter Property="CornerRadius" Value="4"/>
+                                                    </Style>
+                                                    <Style Selector="Button.icon-button:pointerover">
+                                                        <Setter Property="Background" Value="{DynamicResource ListItemBackgroundHover}"/>
+                                                    </Style>
+                                                </ListBox.Styles>
+                                            </ListBox>
+                                        </Grid>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+                        <!-- Transitions for smooth state changes -->
+                        <Grid.Styles>
+                            <Style Selector="StackPanel">
+                                <Setter Property="Transitions">
+                                    <Transitions>
+                                        <DoubleTransition Property="Opacity" Duration="0:0:0.2"/>
+                                    </Transitions>
+                                </Setter>
+                                <Style.Animations>
+                                    <Animation Duration="0:0:0.2">
+                                        <KeyFrame Cue="0%">
+                                            <Setter Property="Opacity" Value="0"/>
+                                            <Setter Property="IsVisible" Value="True"/>
+                                        </KeyFrame>
+                                        <KeyFrame Cue="100%">
+                                            <Setter Property="Opacity" Value="1"/>
+                                        </KeyFrame>
+                                    </Animation>
+                                </Style.Animations>
+                            </Style>
+                            <Style Selector="Grid">
+                                <Setter Property="Transitions">
+                                    <Transitions>
+                                        <DoubleTransition Property="Opacity" Duration="0:0:0.2"/>
+                                    </Transitions>
+                                </Setter>
+                                <Style.Animations>
+                                    <Animation Duration="0:0:0.2">
+                                        <KeyFrame Cue="0%">
+                                            <Setter Property="Opacity" Value="0"/>
+                                            <Setter Property="IsVisible" Value="True"/>
+                                        </KeyFrame>
+                                        <KeyFrame Cue="100%">
+                                            <Setter Property="Opacity" Value="1"/>
+                                        </KeyFrame>
+                                    </Animation>
+                                </Style.Animations>
+                            </Style>
+                        </Grid.Styles>                        <!-- Add Application Panel -->
+                        <Border IsVisible="{Binding IsAddAppPanelOpen}"
+                               Background="{DynamicResource PanelBackground}"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Stretch"
+                               Width="400"
+                               BoxShadow="-4 0 10 0 #20000000"
+                               ZIndex="90"
+                               Padding="25">
+                            <Border.Styles>
+                                <Style Selector="Border">
+                                    <Style.Animations>
+                                        <Animation Duration="0:0:0.3" FillMode="Forward" Easing="CubicEaseOut">
+                                            <KeyFrame Cue="0%">
+                                                <Setter Property="TranslateTransform.X" Value="400"/>
+                                                <Setter Property="Opacity" Value="0.5"/>
+                                            </KeyFrame>
+                                            <KeyFrame Cue="100%">
+                                                <Setter Property="TranslateTransform.X" Value="0"/>
+                                                <Setter Property="Opacity" Value="1"/>
+                                            </KeyFrame>
+                                        </Animation>
+                                    </Style.Animations>
+                                </Style>
+                            </Border.Styles>
+                            
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- Header -->
+                                <StackPanel Grid.Row="0" Spacing="10" Margin="0,0,0,20">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        
+                                        <TextBlock Text="Add New Application" 
+                                                  FontSize="20"
+                                                  FontWeight="SemiBold"
+                                                  Grid.Column="0"
+                                                  VerticalAlignment="Center"/>
+                                                  
+                                        <Button Grid.Column="1"
+                                               Command="{Binding CloseAddAppPanelCommand}"
+                                               Background="Transparent"
+                                               BorderThickness="0"
+                                               Padding="8"
+                                               CornerRadius="4">
+                                            <PathIcon Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"
+                                                     Width="16"
+                                                     Height="16"/>
+                                        </Button>
+                                    </Grid>
+                                    
+                                    <TextBlock Text="Add a new application to track"
+                                             Foreground="{DynamicResource SecondaryTextColor}"/>
+                                </StackPanel>
+
+                                <!-- Form Fields -->
+                                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">                                    <StackPanel Spacing="15">
+                                        <!-- Program Name -->
+                                        <StackPanel>
+                                            <TextBlock Text="Program Name (Optional)"
+                                                     Margin="0,0,0,5"
+                                                     FontWeight="Medium"/>
+                                            <TextBox Text="{Binding NewAppName}"
+                                                    Watermark="Enter program name"
+                                                    Background="{DynamicResource TextBoxBackground}"/>
+                                        </StackPanel>
+
+                                        <!-- Location Folder -->
+                                        <StackPanel>
+                                            <TextBlock Text="Application Location Folder (Optional)"
+                                                     Margin="0,0,0,5"
+                                                     FontWeight="Medium"/>
+                                                     
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBox Grid.Column="0"
+                                                       Text="{Binding NewAppLocationFolder}"
+                                                       Watermark="Enter location folder path"
+                                                       Background="{DynamicResource TextBoxBackground}"/>
+                                                       
+                                                <Button Grid.Column="1"
+                                                      Command="{Binding BrowseForLocationFolderCommand}"
+                                                      Content="Browse"
+                                                      Padding="10,7"
+                                                      Margin="5,0,0,0"
+                                                      BorderBrush="#FF9800"
+                                                      BorderThickness="1"
+                                                      Background="Transparent"
+                                                      Foreground="#FF9800"
+                                                      CornerRadius="4"/>
+                                            </Grid>
+                                        </StackPanel>
+                                        
+                                        <!-- Executable Path -->
+                                        <StackPanel>
+                                            <TextBlock Text="Executable Path (Required)"
+                                                     Margin="0,0,0,5"
+                                                     FontWeight="Medium"/>
+                                                     
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBox Grid.Column="0"
+                                                       Text="{Binding NewAppExecutablePath}"
+                                                       Watermark="Enter executable file path"
+                                                       Background="{DynamicResource TextBoxBackground}"/>
+                                                       
+                                                <Button Grid.Column="1"
+                                                      Command="{Binding BrowseForExecutableCommand}"
+                                                      Content="Browse"
+                                                      Padding="10,7"
+                                                      Margin="5,0,0,0"
+                                                      BorderBrush="#FF9800"
+                                                      BorderThickness="1"
+                                                      Background="Transparent"
+                                                      Foreground="#FF9800"
+                                                      CornerRadius="4"/>
+                                            </Grid>
+                                        </StackPanel>
+                                        
+                                        <!-- Save Location -->
+                                        <StackPanel>
+                                            <TextBlock Text="Save Location (Optional)"
+                                                     Margin="0,0,0,5"
+                                                     FontWeight="Medium"/>
+                                                     
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBox Grid.Column="0"
+                                                       Text="{Binding NewAppSavePath}"
+                                                       Watermark="Enter save location path"
+                                                       Background="{DynamicResource TextBoxBackground}"/>
+                                                       
+                                                <Button Grid.Column="1"
+                                                      Command="{Binding BrowseForSaveLocationCommand}"
+                                                      Content="Browse"
+                                                      Padding="10,7"
+                                                      Margin="5,0,0,0"
+                                                      BorderBrush="#FF9800"
+                                                      BorderThickness="1"
+                                                      Background="Transparent"
+                                                      Foreground="#FF9800"
+                                                      CornerRadius="4"/>
+                                            </Grid>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </ScrollViewer>
+
+                                <!-- Action Buttons -->
+                                <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,20,0,0">
+                                    <Button Grid.Column="0"
+                                          Command="{Binding AddNewApplicationCommand}"
+                                          Background="#FF9800"
+                                          Foreground="White"
+                                          FontWeight="SemiBold"
+                                          Padding="15,10"
+                                          CornerRadius="6"
+                                          HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Center"
+                                          Margin="0,0,5,0">
+                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                            <PathIcon Data="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" Width="16" Height="16"/>
+                                            <TextBlock Text="Add Application"/>
+                                        </StackPanel>
+                                    </Button>
+                                    
+                                    <Button Grid.Column="1"
+                                          Command="{Binding CloseAddAppPanelCommand}"
+                                          Content="Cancel"
+                                          Background="Transparent"
+                                          BorderThickness="1"
+                                          BorderBrush="#f44336"
+                                          Foreground="#f44336"
+                                          FontWeight="SemiBold"
+                                          Padding="15,10"
+                                          CornerRadius="6"
+                                          Width="100"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                        
+                        <!-- Authentication Popup -->
+                        <Border IsVisible="{Binding IsLoginPopupOpen}"
+                                Background="#80000000"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Stretch"
+                                ZIndex="100">
+                            <Border Width="400"
+                                    MinHeight="400"
+                                    CornerRadius="12"
+                                    Background="{DynamicResource PanelBackground}"
+                                    BoxShadow="0 8 32 0 #40000000"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Padding="25"
+                                    Classes.show="{Binding IsLoginPopupOpen}">
+                                <Border.Styles>
+                                    <Style Selector="Border.show">
+                                        <Style.Animations>
+                                            <Animation Duration="0:0:0.3" FillMode="Forward" Easing="CubicEaseOut">
+                                                <KeyFrame Cue="0%">
+                                                    <Setter Property="Opacity" Value="0"/>
+                                                    <Setter Property="ScaleTransform.ScaleX" Value="0.8"/>
+                                                    <Setter Property="ScaleTransform.ScaleY" Value="0.8"/>
+                                                </KeyFrame>
+                                                <KeyFrame Cue="100%">
+                                                    <Setter Property="Opacity" Value="1"/>
+                                                    <Setter Property="ScaleTransform.ScaleX" Value="1"/>
+                                                    <Setter Property="ScaleTransform.ScaleY" Value="1"/>
+                                                </KeyFrame>
+                                            </Animation>
+                                        </Style.Animations>
+                                    </Style>
+                                </Border.Styles>
+
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Header with Logo -->
+                                    <StackPanel Grid.Row="0" Spacing="10" Margin="0,0,0,20">
+                                        <Image Source="/Assets/logo.ico" Width="48" Height="48" Margin="0,0,0,5"/>
+                                        <TextBlock Text="Welcome to Save Vault" 
+                                                 FontSize="24"
+                                                 FontWeight="SemiBold"
+                                                 HorizontalAlignment="Center"/>
+                                        <TextBlock Text="Your game saves, secured" 
+                                                 Foreground="{DynamicResource SecondaryTextColor}"
+                                                 HorizontalAlignment="Center"/>
+                                    </StackPanel>                                    <!-- TabControl for different auth modes -->
+                                    <TabControl Grid.Row="1" Margin="0,0,0,20" HorizontalAlignment="Center">
+                                        <TabControl.Styles>
+                                            <Style Selector="TabItem">
+                                                <Setter Property="FontSize" Value="14"/>
+                                                <Setter Property="Height" Value="40"/>
+                                                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                                                <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                                                <Setter Property="Margin" Value="0,0,15,0"/>
+                                                <Setter Property="Padding" Value="10,0"/>
+                                            </Style>
+                                            <Style Selector="TabItem:selected">
+                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                            </Style>
+                                            <Style Selector="TabControl WrapPanel">
+                                                <Setter Property="HorizontalAlignment" Value="Center"/>
+                                            </Style>
+                                        </TabControl.Styles>
+                                          <!-- Login Tab -->
+                                        <TabItem Header="Sign In">
+                                            <StackPanel Spacing="15" Margin="0,20,0,0" Width="300">
+                                                <Border Background="{DynamicResource TextBoxBackground}"
+                                                        CornerRadius="6"
+                                                        Padding="12,8">
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <PathIcon Data="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"
+                                                                 Opacity="0.6"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Margin="0,0,12,0"/>
+                                                        <TextBox Grid.Column="1"
+                                                                Watermark="Username or Email"
+                                                                Text="{Binding Username}"
+                                                                BorderThickness="0"
+                                                                Background="Transparent"/>
+                                                    </Grid>
+                                                </Border>
+
+                                                <Border Background="{DynamicResource TextBoxBackground}"
+                                                        CornerRadius="6"
+                                                        Padding="12,8">
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <PathIcon Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z"
+                                                                 Opacity="0.6"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Margin="0,0,12,0"/>
+                                                        <TextBox Grid.Column="1"
+                                                                Watermark="Password"
+                                                                Text="{Binding Password}"
+                                                                PasswordChar="•"
+                                                                BorderThickness="0"
+                                                                Background="Transparent"/>
+                                                    </Grid>                                                </Border>
+
+                                                <!-- Information Box -->
+                                                <Border Background="#FFF3E0"
+                                                        BorderBrush="#FFB74D"
+                                                        BorderThickness="1"
+                                                        CornerRadius="4"
+                                                        Padding="12,8"
+                                                        Margin="0,10,0,10">
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <PathIcon Grid.Column="0"
+                                                                 Data="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"
+                                                                 Width="16"
+                                                                 Height="16"
+                                                                 Foreground="#F57C00"
+                                                                 Margin="0,0,8,0"/>
+                                                        <TextBlock Grid.Column="1"
+                                                                 Text="Email functionality is currently unavailable. Password reset and account creation confirmations will not be sent."
+                                                                 TextWrapping="Wrap"
+                                                                 Foreground="#E65100"/>
+                                                    </Grid>
+                                                </Border>
+
+                                                <Grid Margin="0,10,0,0" ColumnDefinitions="*,Auto">
+                                                    <Button Grid.Column="0"
+                                                            Command="{Binding LoginCommand}"
+                                                            Classes="primary"
+                                                            Height="40"
+                                                            HorizontalContentAlignment="Center"
+                                                            VerticalContentAlignment="Center"
+                                                            Margin="0,0,10,0">
+                                                        <TextBlock Text="Sign In"
+                                                                 HorizontalAlignment="Center"
+                                                                 VerticalAlignment="Center"/>
+                                                        <Button.Styles>
+                                                            <Style Selector="Button.primary">
+                                                                <Setter Property="Background" Value="#FF9800"/>
+                                                                <Setter Property="Foreground" Value="White"/>
+                                                                <Setter Property="CornerRadius" Value="6"/>
+                                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                                                <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                                            </Style>
+                                                            <Style Selector="Button.primary:pointerover">
+                                                                <Setter Property="Background" Value="#F57C00"/>
+                                                            </Style>
+                                                        </Button.Styles>
+                                                    </Button>
+
+                                                    <Button Grid.Column="1"
+                                                            Command="{Binding CloseLoginPopupCommand}"
+                                                            Classes="close"
+                                                            Height="40"
+                                                            Width="100"
+                                                            HorizontalContentAlignment="Center"
+                                                            VerticalContentAlignment="Center">
+                                                        <Button.Styles>
+                                                            <Style Selector="Button.close">
+                                                                <Setter Property="Background" Value="Transparent"/>
+                                                                <Setter Property="BorderThickness" Value="1"/>
+                                                                <Setter Property="BorderBrush" Value="#f44336"/>
+                                                                <Setter Property="Foreground" Value="#f44336"/>
+                                                                <Setter Property="CornerRadius" Value="6"/>
+                                                                <Setter Property="Content" Value="Close"/>
+                                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                                            </Style>
+                                                            <Style Selector="Button.close:pointerover">
+                                                                <Setter Property="Background" Value="#f443361A"/>
+                                                            </Style>
+                                                        </Button.Styles>
+                                                    </Button>
+                                                </Grid>
+                                            </StackPanel>
+                                        </TabItem>                                        <!-- Register Tab -->
+                                        <TabItem Header="Create Account">
+                                            <StackPanel Spacing="15" Margin="0,20,0,0" Width="300">
+                                                <Border Background="{DynamicResource TextBoxBackground}"
+                                                        CornerRadius="6"
+                                                        Padding="12,8">
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <PathIcon Data="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"
+                                                                 Opacity="0.6"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Margin="0,0,12,0"/>
+                                                        <TextBox Grid.Column="1"
+                                                                Watermark="Choose a username"
+                                                                Text="{Binding Username}"
+                                                                BorderThickness="0"
+                                                                Background="Transparent"/>
+                                                    </Grid>
+                                                </Border>
+
+                                                <Border Background="{DynamicResource TextBoxBackground}"
+                                                        CornerRadius="6"
+                                                        Padding="12,8">
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <PathIcon Data="M20,8L12,13L4,8V6L12,11L20,6M20,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6C22,4.89 21.1,4 20,4Z"
+                                                                 Opacity="0.6"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Margin="0,0,12,0"/>
+                                                        <TextBox Grid.Column="1"
+                                                                Watermark="Your email address"
+                                                                Text="{Binding Email}"
+                                                                BorderThickness="0"
+                                                                Background="Transparent"/>
+                                                    </Grid>
+                                                </Border>                                                <Border Background="{DynamicResource TextBoxBackground}"
+                                                        CornerRadius="6"
+                                                        Padding="12,8">
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <PathIcon Data="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z"
+                                                                 Opacity="0.6"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Margin="0,0,12,0"/>
+                                                        <TextBox Grid.Column="1"
+                                                                Watermark="Choose a password"
+                                                                Text="{Binding Password}"
+                                                                PasswordChar="•"
+                                                                BorderThickness="0"
+                                                                Background="Transparent"/>
+                                                    </Grid>
+                                                </Border>
+
+                                                <!-- Information Box -->
+                                                <Border Background="#FFF3E0"
+                                                        BorderBrush="#FFB74D"
+                                                        BorderThickness="1"
+                                                        CornerRadius="4"
+                                                        Padding="12,8"
+                                                        Margin="0,10,0,10">
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <PathIcon Grid.Column="0"
+                                                                 Data="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"
+                                                                 Width="16"
+                                                                 Height="16"
+                                                                 Foreground="#F57C00"
+                                                                 Margin="0,0,8,0"/>
+                                                        <TextBlock Grid.Column="1"
+                                                                 Text="Email functionality is currently unavailable. Account verification emails will not be sent."
+                                                                 TextWrapping="Wrap"
+                                                                 Foreground="#E65100"/>
+                                                    </Grid>
+                                                </Border>
+                                                
+                                                <Grid Margin="0,10,0,0" ColumnDefinitions="*,Auto">
+                                                    <Button Grid.Column="0"
+                                                            Command="{Binding RegisterCommand}"
+                                                            Classes="success"
+                                                            Height="40"
+                                                            HorizontalContentAlignment="Center"
+                                                            VerticalContentAlignment="Center"
+                                                            Margin="0,0,10,0">
+                                                        <TextBlock Text="Create Account"
+                                                                 HorizontalAlignment="Center"
+                                                                 VerticalAlignment="Center"/>
+                                                        <Button.Styles>
+                                                            <Style Selector="Button.success">
+                                                                <Setter Property="Background" Value="#4CAF50"/>
+                                                                <Setter Property="Foreground" Value="White"/>
+                                                                <Setter Property="CornerRadius" Value="6"/>
+                                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                                                <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                                            </Style>
+                                                            <Style Selector="Button.success:pointerover">
+                                                                <Setter Property="Background" Value="#388E3C"/>
+                                                            </Style>
+                                                        </Button.Styles>
+                                                    </Button>
+
+                                                    <Button Grid.Column="1"
+                                                            Command="{Binding CloseLoginPopupCommand}"
+                                                            Classes="close"
+                                                            Height="40"
+                                                            Width="100"
+                                                            HorizontalContentAlignment="Center"
+                                                            VerticalContentAlignment="Center">
+                                                        <Button.Styles>
+                                                            <Style Selector="Button.close">
+                                                                <Setter Property="Background" Value="Transparent"/>
+                                                                <Setter Property="BorderThickness" Value="1"/>
+                                                                <Setter Property="BorderBrush" Value="#f44336"/>
+                                                                <Setter Property="Foreground" Value="#f44336"/>
+                                                                <Setter Property="CornerRadius" Value="6"/>
+                                                                <Setter Property="Content" Value="Close"/>
+                                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                                            </Style>
+                                                            <Style Selector="Button.close:pointerover">
+                                                                <Setter Property="Background" Value="#f443361A"/>
+                                                            </Style>
+                                                        </Button.Styles>
+                                                    </Button>
+                                                </Grid>
+                                            </StackPanel>
+                                        </TabItem>                                        <!-- Reset Password Tab -->
+                                        <TabItem Header="Reset">
+                                            <StackPanel Spacing="15" Margin="0,20,0,0" Width="300">
+                                                <TextBlock Text="Forgot your password?"
+                                                         FontSize="18"
+                                                         FontWeight="SemiBold"
+                                                         Margin="0,0,0,5"/>
+                                                         
+                                                <TextBlock Text="Don't worry! Enter your email address and we'll send you instructions to reset your password."
+                                                         TextWrapping="Wrap"
+                                                         Foreground="{DynamicResource SecondaryTextColor}"
+                                                         Margin="0,0,0,15"/>
+
+                                                <Border Background="{DynamicResource TextBoxBackground}"
+                                                        CornerRadius="6"
+                                                        Padding="12,8">
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <PathIcon Data="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"
+                                                                 Opacity="0.6"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Margin="0,0,12,0"/>
+                                                        <TextBox Grid.Column="1"
+                                                                Watermark="Your username"
+                                                                Text="{Binding Username}"
+                                                                BorderThickness="0"
+                                                                Background="Transparent"/>
+                                                    </Grid>
+                                                </Border>                                                <Border Background="{DynamicResource TextBoxBackground}"
+                                                        CornerRadius="6"
+                                                        Padding="12,8">
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <PathIcon Data="M20,8L12,13L4,8V6L12,11L20,6M20,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V6C22,4.89 21.1,4 20,4Z"
+                                                                 Opacity="0.6"
+                                                                 Width="20"
+                                                                 Height="20"
+                                                                 Margin="0,0,12,0"/>
+                                                        <TextBox Grid.Column="1"
+                                                                Watermark="Your email"
+                                                                Text="{Binding Email}"
+                                                                BorderThickness="0"
+                                                                Background="Transparent"/>
+                                                    </Grid>
+                                                </Border>
+
+                                                <!-- Information Box -->
+                                                <Border Background="#FFF3E0"
+                                                        BorderBrush="#FFB74D"
+                                                        BorderThickness="1"
+                                                        CornerRadius="4"
+                                                        Padding="12,8"
+                                                        Margin="0,10,0,10">
+                                                    <Grid ColumnDefinitions="Auto,*">
+                                                        <PathIcon Grid.Column="0"
+                                                                 Data="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"
+                                                                 Width="16"
+                                                                 Height="16"
+                                                                 Foreground="#F57C00"
+                                                                 Margin="0,0,8,0"/>
+                                                        <TextBlock Grid.Column="1"
+                                                                 Text="Email functionality is currently unavailable. Password reset instructions will not be sent."
+                                                                 TextWrapping="Wrap"
+                                                                 Foreground="#E65100"/>
+                                                    </Grid>
+                                                </Border>
+
+                                                <Grid Margin="0,10,0,0" ColumnDefinitions="*,Auto">
+                                                    <Button Grid.Column="0"
+                                                            Command="{Binding ForgotPasswordCommand}"
+                                                            Classes="info"
+                                                            Height="40"
+                                                            HorizontalContentAlignment="Center"
+                                                            VerticalContentAlignment="Center"
+                                                            Margin="0,0,10,0">
+                                                        <TextBlock Text="Send Reset Instructions"
+                                                                 HorizontalAlignment="Center"
+                                                                 VerticalAlignment="Center"/>
+                                                        <Button.Styles>
+                                                            <Style Selector="Button.info">
+                                                                <Setter Property="Background" Value="#2196F3"/>
+                                                                <Setter Property="Foreground" Value="White"/>
+                                                                <Setter Property="CornerRadius" Value="6"/>
+                                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                                                <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                                                            </Style>
+                                                            <Style Selector="Button.info:pointerover">
+                                                                <Setter Property="Background" Value="#1976D2"/>
+                                                            </Style>
+                                                        </Button.Styles>
+                                                    </Button>
+
+                                                    <Button Grid.Column="1"
+                                                            Command="{Binding CloseLoginPopupCommand}"
+                                                            Classes="close"
+                                                            Height="40"
+                                                            Width="100"
+                                                            HorizontalContentAlignment="Center"
+                                                            VerticalContentAlignment="Center">
+                                                        <Button.Styles>
+                                                            <Style Selector="Button.close">
+                                                                <Setter Property="Background" Value="Transparent"/>
+                                                                <Setter Property="BorderThickness" Value="1"/>
+                                                                <Setter Property="BorderBrush" Value="#f44336"/>
+                                                                <Setter Property="Foreground" Value="#f44336"/>
+                                                                <Setter Property="CornerRadius" Value="6"/>
+                                                                <Setter Property="Content" Value="Close"/>
+                                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                                            </Style>
+                                                            <Style Selector="Button.close:pointerover">
+                                                                <Setter Property="Background" Value="#f443361A"/>
+                                                            </Style>
+                                                        </Button.Styles>
+                                                    </Button>
+                                                </Grid>
+                                            </StackPanel>
+                                        </TabItem>                                    </TabControl>
+                                </Grid>
+                            </Border>                        </Border>
+                        
+                        <!-- Profile Panel -->
+                        <Border IsVisible="{Binding IsProfilePanelOpen}"
+                               Background="{DynamicResource PanelBackground}"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Stretch"
+                               Width="400"
+                               BoxShadow="-4 0 10 0 #20000000"
+                               ZIndex="90"
+                               Padding="25">
+                            <Border.Styles>
+                                <Style Selector="Border">
+                                    <Style.Animations>
+                                        <Animation Duration="0:0:0.3" FillMode="Forward" Easing="CubicEaseOut">
+                                            <KeyFrame Cue="0%">
+                                                <Setter Property="TranslateTransform.X" Value="400"/>
+                                                <Setter Property="Opacity" Value="0.5"/>
+                                            </KeyFrame>
+                                            <KeyFrame Cue="100%">
+                                                <Setter Property="TranslateTransform.X" Value="0"/>
+                                                <Setter Property="Opacity" Value="1"/>
+                                            </KeyFrame>
+                                        </Animation>
+                                    </Style.Animations>
+                                </Style>
+                            </Border.Styles>
+                            
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- Header -->
+                                <StackPanel Grid.Row="0" Spacing="10" Margin="0,0,0,20">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        
+                                        <TextBlock Text="User Profile" 
+                                                  FontSize="20"
+                                                  FontWeight="SemiBold"
+                                                  Grid.Column="0"
+                                                  VerticalAlignment="Center"/>
+                                                  
+                                        <Button Grid.Column="1"
+                                               Command="{Binding CloseProfilePanelCommand}"
+                                               Background="Transparent"
+                                               BorderThickness="0"
+                                               Padding="8"
+                                               CornerRadius="4">
+                                            <PathIcon Data="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"
+                                                     Width="16"
+                                                     Height="16"/>
+                                        </Button>
+                                    </Grid>
+                                    
+                                    <TextBlock Text="Manage your account settings"
+                                             Foreground="{DynamicResource SecondaryTextColor}"/>
+                                </StackPanel>
+
+                                <!-- Profile Content -->
+                                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                    <StackPanel Spacing="15">
+                                        <!-- User Avatar -->
+                                        <Border Width="80" Height="80" 
+                                              CornerRadius="40" 
+                                              BorderBrush="{DynamicResource DividerColor}"
+                                              BorderThickness="2"
+                                              HorizontalAlignment="Center"
+                                              Margin="0,10,0,20"
+                                              ClipToBounds="True">
+                                            <Panel>
+                                                <!-- Background Circle -->
+                                                <Ellipse Width="80" Height="80" 
+                                                       Fill="{DynamicResource PanelBackground}"/>
+                                                
+                                                <!-- User Initial -->
+                                                <TextBlock Text="{Binding LoggedInInitial}" 
+                                                         FontWeight="SemiBold" 
+                                                         FontSize="36"
+                                                         Foreground="#FF9800"
+                                                         HorizontalAlignment="Center"
+                                                         VerticalAlignment="Center"/>
+                                            </Panel>
+                                        </Border>
+                                        
+                                        <!-- Username -->
+                                        <StackPanel>
+                                            <TextBlock Text="Username"
+                                                     Margin="0,0,0,5"
+                                                     FontWeight="Medium"
+                                                     Foreground="{DynamicResource SecondaryTextColor}"/>                                            <TextBlock Text="{Binding Settings.LoggedInUser}"
+                                                     FontSize="18"
+                                                     FontWeight="SemiBold"/>
+                                        </StackPanel>
+
+                                        <!-- Account Information Section -->
+                                        <TextBlock Text="ACCOUNT DETAILS" 
+                                                 Margin="0,10,0,5"
+                                                 FontSize="14"
+                                                 FontWeight="SemiBold"
+                                                 Foreground="{DynamicResource SecondaryTextColor}"/>
+                                                 
+                                        <!-- Email -->
+                                        <StackPanel>
+                                            <TextBlock Text="Email"
+                                                     Margin="0,0,0,5"
+                                                     FontWeight="Medium"
+                                                     Foreground="{DynamicResource SecondaryTextColor}"/>
+                                            <TextBlock Text="{Binding Email}"
+                                                     FontSize="14"/>
+                                        </StackPanel>
+                                        
+                                        <!-- Last Login -->
+                                        <StackPanel>
+                                            <TextBlock Text="Last Login"
+                                                     Margin="0,0,0,5"
+                                                     FontWeight="Medium"
+                                                     Foreground="{DynamicResource SecondaryTextColor}"/>
+                                            <TextBlock Text="Today at 14:30"
+                                                     FontSize="14"/>
+                                        </StackPanel>
+                                        
+                                        <!-- Sync Status -->
+                                        <StackPanel Margin="0,10,0,0">
+                                            <TextBlock Text="Sync Status"
+                                                     Margin="0,0,0,5"
+                                                     FontWeight="Medium"
+                                                     Foreground="{DynamicResource SecondaryTextColor}"/>
+                                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                                <Ellipse Width="10" Height="10" Fill="#4CAF50" VerticalAlignment="Center"/>
+                                                <TextBlock Text="Online"
+                                                         FontSize="14"
+                                                         VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        
+                                        <!-- Divider -->
+                                        <Separator Height="1" Background="{DynamicResource DividerColor}" Margin="0,10,0,10"/>
+                                          <!-- Application Settings Section -->
+                                        <TextBlock Text="APPLICATION SETTINGS" 
+                                                 Margin="0,10,0,5"
+                                                 FontSize="14"
+                                                 FontWeight="SemiBold"
+                                                 Foreground="{DynamicResource SecondaryTextColor}"/>
+                                                   <!-- Cloud Sync Option -->
+                                        <Grid Margin="0,10,0,0" HorizontalAlignment="Stretch">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" 
+                                                     Text="Cloud Sync:" 
+                                                     VerticalAlignment="Center"
+                                                     Width="100"/>
+                                            <ToggleSwitch Grid.Column="1" 
+                                                        IsChecked="True"
+                                                        OnContent="Enabled" 
+                                                        OffContent="Disabled"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </ScrollViewer>                                <!-- Action Buttons -->
+                                <Grid Grid.Row="2" Margin="0,20,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Grid.Column="0"
+                                          Background="#FF9800"
+                                          Foreground="White"
+                                          FontWeight="SemiBold"
+                                          Padding="10,10"
+                                          CornerRadius="6"
+                                          HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Center"
+                                          Content="Update Profile"
+                                          Margin="0,0,5,0"/>
+                                    
+                                    <Button Grid.Column="1"
+                                          Command="{Binding LogoutCommand}"
+                                          Background="Transparent"
+                                          BorderThickness="1"
+                                          BorderBrush="#f44336"
+                                          Foreground="#f44336"
+                                          FontWeight="SemiBold"
+                                          Padding="10,10"
+                                          CornerRadius="6"
+                                          HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Center"
+                                          Content="Logout"
+                                          Margin="5,0,0,0"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

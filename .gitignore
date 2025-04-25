@@ -1,0 +1,9 @@
+/Main/bin/
+/Main/obj/
+/Main/.vs/ 
+/Main/*.user
+/Main/*.suo
+/Main/*.db
+/Backup/
+/Main/Main.sln
+/Server/index.php

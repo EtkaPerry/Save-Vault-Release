@@ -1,0 +1,294 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:SaveVaultApp.ViewModels"
+        mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="400"
+        x:Class="SaveVaultApp.Views.OptionsWindow"
+        x:DataType="vm:OptionsViewModel"        Title="Options"
+        Width="600" Height="400"
+        MinWidth="500" MinHeight="350"
+        WindowStartupLocation="CenterOwner"
+        CanResize="True"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="NoChrome"
+        ExtendClientAreaTitleBarHeightHint="-1"
+        Background="{DynamicResource PanelBackground}">
+
+    <Window.Styles>
+        <Style Selector="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextColor}" />
+        </Style>
+    </Window.Styles>
+
+    <DockPanel>
+        <!-- Custom Title Bar -->
+        <Grid DockPanel.Dock="Top" Height="30" Background="{DynamicResource TitleBarBackground}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            
+            <!-- Window Title - This area will be used for window dragging -->
+            <Border Grid.Column="0" Name="DragRegion" Background="Transparent">
+                <TextBlock Text="Options" VerticalAlignment="Center" HorizontalAlignment="Center" />
+            </Border>
+            
+            <!-- Close Button -->
+            <Button Grid.Column="1" Width="45" Height="30" Background="Transparent" BorderThickness="0" Padding="0" Name="CloseButton">
+                <Path Data="M 0,0 L 10,10 M 0,10 L 10,0" Stroke="{DynamicResource TextColor}" StrokeThickness="1" VerticalAlignment="Center" HorizontalAlignment="Center" />
+            </Button>
+        </Grid>
+
+        <!-- Options Content -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="30*" />
+                <ColumnDefinition Width="70*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left Panel (30%) -->
+            <Border Grid.Column="0" Background="{DynamicResource SidebarBackground}" Padding="10">
+                <ListBox Background="Transparent" BorderThickness="0" Name="OptionsList">
+                    <ListBoxItem Content="General" />
+                    <ListBoxItem Content="Appearance" />
+                    <ListBoxItem Content="Storage" />
+                    <ListBoxItem Content="Credit" />
+                </ListBox>
+            </Border>
+
+            <!-- Right Panel (70%) -->
+            <Border Grid.Column="1" Background="{DynamicResource MainBackground}" Padding="20">
+                <Grid>
+                    <!-- General Panel -->
+                    <StackPanel Name="GeneralPanel">
+                        <TextBlock Text="General Settings" FontSize="18" FontWeight="Bold" Margin="0,0,0,15"/>
+                        
+                        <!-- Auto-save Interval -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Auto-save every:" 
+                                     VerticalAlignment="Center" 
+                                     Width="120"/>
+                            <NumericUpDown Value="{Binding AutoSaveInterval}"
+                                         Minimum="1"
+                                         Maximum="60"
+                                         Width="100"/>
+                            <TextBlock Text="minutes" 
+                                     VerticalAlignment="Center" 
+                                     Margin="10,0,0,0"/>
+                        </StackPanel>
+
+                        <!-- Max Auto-saves -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Max auto-saves:" 
+                                     VerticalAlignment="Center" 
+                                     Width="120"/>
+                            <NumericUpDown Value="{Binding MaxAutoSaves}"
+                                         Minimum="1"
+                                         Maximum="50"
+                                         Width="100"/>
+                            <TextBlock Text="backups" 
+                                     VerticalAlignment="Center" 
+                                     Margin="10,0,0,0"/>
+                        </StackPanel>
+                        
+                        <!-- Max Start-saves -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Max start-saves:" 
+                                     VerticalAlignment="Center" 
+                                     Width="120"/>
+                            <NumericUpDown Value="{Binding MaxStartSaves}"
+                                         Minimum="1"
+                                         Maximum="20"
+                                         Width="100"/>
+                            <TextBlock Text="backups" 
+                                     VerticalAlignment="Center" 
+                                     Margin="10,0,0,0"/>
+                        </StackPanel>
+                        
+                        <!-- Global auto-save toggle -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Auto-save enabled:" 
+                                     VerticalAlignment="Center" 
+                                     Width="120"/>
+                            <ToggleSwitch IsChecked="{Binding GlobalAutoSaveEnabled}"/>
+                        </StackPanel>
+                        
+                        <!-- Program start saves toggle -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Save on start:" 
+                                     VerticalAlignment="Center" 
+                                     Width="120"/>
+                            <ToggleSwitch IsChecked="{Binding StartSaveEnabled}"/>
+                        </StackPanel>
+
+                        <!-- Status message -->
+                        <TextBlock Text="Changes are saved automatically" 
+                                 HorizontalAlignment="Right"
+                                 Margin="0,20,0,0" 
+                                 Opacity="0.7"
+                                 FontStyle="Italic"/>
+                    </StackPanel>
+
+                    <!-- Appearance Panel -->
+                    <StackPanel Name="AppearancePanel" IsVisible="False">
+                        <TextBlock Text="Appearance" FontSize="18" FontWeight="Bold" Margin="0,0,0,15"/>
+                        
+                        <!-- Theme Selection -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Theme:" 
+                                     VerticalAlignment="Center" 
+                                     Width="120"/>
+                            <ComboBox Width="200" 
+                                     SelectedItem="{Binding SelectedTheme}"
+                                     Background="{DynamicResource ListItemBackground}">
+                                <ComboBox.Items>
+                                    <x:String>System</x:String>
+                                    <x:String>Light</x:String>
+                                    <x:String>Dark</x:String>
+                                </ComboBox.Items>
+                            </ComboBox>
+                        </StackPanel>
+                        
+                        <!-- Status message -->
+                        <TextBlock Text="Changes are saved automatically" 
+                                 HorizontalAlignment="Right"
+                                 Margin="0,20,0,0" 
+                                 Opacity="0.7"
+                                 FontStyle="Italic"/>
+                    </StackPanel>                    <!-- Storage Panel -->
+                    <StackPanel Name="StoragePanel" IsVisible="False">
+                        <TextBlock Text="Storage Settings" FontSize="18" FontWeight="Bold" Margin="0,0,0,15"/>
+                        <TextBlock Text="Backup storage location:" Margin="0,15,0,5"/>
+                        <TextBlock Text="Choose where game saves will be backed up to" 
+                                   TextWrapping="Wrap" Opacity="0.7" Margin="0,0,0,5"/>
+                        <Grid Margin="0,5,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" 
+                                    Text="{Binding BackupStorageLocation}" 
+                                    IsReadOnly="True" 
+                                    Background="{DynamicResource TextBoxBackground}"/>
+                            <Button Grid.Column="1" 
+                                    Content="Browse..." 
+                                    Margin="5,0,0,0" 
+                                    Background="{DynamicResource ListItemBackgroundHover}"
+                                    Command="{Binding BrowseForBackupLocationCommand}"/>
+                        </Grid>
+                        
+                        <!-- Storage Usage Section -->
+                        <TextBlock Text="Storage Usage:" Margin="0,20,0,5" FontWeight="SemiBold"/>
+                        <TextBlock Text="View how much storage space each program is using" 
+                                   TextWrapping="Wrap" Opacity="0.7" Margin="0,0,0,5"/>
+                        
+                        <Grid Margin="0,5,0,10">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            
+                            <!-- Refresh Button -->
+                            <Button Grid.Row="0" 
+                                    Content="Calculate Storage Usage" 
+                                    HorizontalAlignment="Left" 
+                                    Margin="0,0,0,10" 
+                                    Background="{DynamicResource ListItemBackgroundHover}"
+                                    Command="{Binding CalculateStorageUsageCommand}"
+                                    IsVisible="{Binding !IsCalculatingStorage}"/>
+                            
+                            <!-- Loading Indicator -->
+                            <StackPanel Grid.Row="0" 
+                                       Orientation="Horizontal" 
+                                       IsVisible="{Binding IsCalculatingStorage}" 
+                                       Margin="0,0,0,10">
+                                <ProgressBar IsIndeterminate="True" Width="100" Height="4"/>
+                                <TextBlock Text="Calculating storage usage..." Margin="10,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            
+                            <!-- Storage Usage Table Header -->
+                            <Grid Grid.Row="1" 
+                                  Background="{DynamicResource ListItemBackground}" 
+                                  IsVisible="{Binding ProgramStorageInfos.Count}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="100"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <TextBlock Grid.Column="0" 
+                                          Text="Program" 
+                                          Margin="10,8" 
+                                          FontWeight="Bold"/>
+                                <TextBlock Grid.Column="1" 
+                                          Text="Used Storage" 
+                                          Margin="10,8" 
+                                          FontWeight="Bold"/>
+                            </Grid>
+                            
+                            <!-- Storage Usage List -->
+                            <ListBox Grid.Row="2" 
+                                    ItemsSource="{Binding ProgramStorageInfos}" 
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    MaxHeight="200">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,5">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="100"/>
+                                            </Grid.ColumnDefinitions>
+                                            
+                                            <TextBlock Grid.Column="0" Text="{Binding Name}"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding FormattedSize}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                        
+                        <TextBlock Text="Application Management:" Margin="0,20,0,5" FontWeight="SemiBold"/>
+                        
+                        <!-- Program Cache Reset -->
+                        <TextBlock Text="Reset the application cache to force a new scan for all applications." 
+                                   TextWrapping="Wrap" Opacity="0.7" Margin="0,0,0,5"/>
+                        <Button Name="ResetCacheButton" 
+                                Content="Reset Program Cache" 
+                                HorizontalAlignment="Left" 
+                                Margin="0,5,0,15" 
+                                Background="#3371FF"
+                                Padding="10,5"/>
+                                
+                        <!-- Reset All Settings -->
+                        <TextBlock Text="Reset all settings and restart the application. This will clear all preferences." 
+                                   TextWrapping="Wrap" Opacity="0.7" Margin="0,0,0,5"/>
+                        <Button Name="ResetOptionsButton" 
+                                Content="Reset All Settings" 
+                                HorizontalAlignment="Left" 
+                                Margin="0,5,0,0" 
+                                Background="#B03060"
+                                Padding="10,5"/>
+                        
+                        <!-- Status message -->
+                        <TextBlock Text="Changes are saved automatically" 
+                                 HorizontalAlignment="Right"
+                                 Margin="0,20,0,0" 
+                                 Opacity="0.7"
+                                 FontStyle="Italic"/>
+                    </StackPanel>
+
+                    <!-- Credit Panel -->
+                    <StackPanel Name="CreditPanel" IsVisible="False">
+                        <TextBlock Text="Credits" FontSize="18" FontWeight="Bold" Margin="0,0,0,15"/>
+                        <TextBlock Text="Save Vault" FontSize="16" Margin="0,5,0,5"/>
+                        <TextBlock Text="Version 0.*.*" Margin="0,0,0,10"/>
+                        <TextBlock Text="Created by:" Margin="0,10,0,5"/>
+                        <TextBlock Text="Etka" Margin="0,0,0,20"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

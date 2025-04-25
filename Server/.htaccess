@@ -1,0 +1,27 @@
+# Rewrite rules for API routing
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    
+    # If the request starts with "api", route to api.php
+    RewriteCond %{REQUEST_URI} ^/api/.*$ [NC]
+    RewriteRule ^api/(.*)$ api.php [L]
+
+    # Keep normal requests to index.php
+    # RewriteCond %{REQUEST_URI} !^/api/ [NC]
+    # RewriteRule ^(.*)$ index.php [L]
+</IfModule>
+
+# Protect sensitive files
+<Files ~ "^\.(htaccess|htpasswd)$">
+    Order deny,allow
+    Deny from all
+</Files>
+
+# Protect PHP config files
+<Files ~ "\.(php|config\.php|db\.php|jwt_helper\.php)$">
+    Order allow,deny
+    Allow from all
+</Files>
+
+# Disable directory browsing
+Options -Indexes

@@ -1,0 +1,61 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="SaveVaultApp.App"
+             xmlns:local="using:SaveVaultApp"
+             xmlns:utils="using:SaveVaultApp.Utilities"
+             RequestedThemeVariant="Default">
+             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+
+    <Application.DataTemplates>
+        <local:ViewLocator/>
+    </Application.DataTemplates>
+  
+    <Application.Styles>
+        <FluentTheme />
+    </Application.Styles>
+    
+    <Application.Resources>
+        <ResourceDictionary>
+            <utils:StringNotEmptyConverter x:Key="StringNotEmptyConverter"/>
+            <ResourceDictionary.ThemeDictionaries>
+                <!-- Dark Theme Values - Using existing colors for dark mode -->
+                <ResourceDictionary x:Key="Dark">
+                    <Color x:Key="TitleBarBackground">#1a1a1a</Color>
+                    <Color x:Key="MainBackground">#212121</Color>
+                    <Color x:Key="SidebarBackground">#1a1a1a</Color>
+                    <Color x:Key="PanelBackground">#1e1e1e</Color>
+                    <Color x:Key="ListItemBackground">#2d2d2d</Color>
+                    <Color x:Key="ListItemBackgroundHover">#3d3d3d</Color>
+                    <Color x:Key="TextBoxBackground">#2d2d2d</Color>
+                    <Color x:Key="HeaderBackground">#2d2d2d</Color>
+                    <Color x:Key="StatusBarBackground">#1a1a1a</Color>
+                    <Color x:Key="DividerColor">#333333</Color>
+                    <Color x:Key="TextColor">White</Color>
+                    <Color x:Key="SecondaryTextColor">#aaaaaa</Color>                    <!-- Add Bitmap resource for dark theme -->
+                    <Bitmap x:Key="SortIconSource">/Assets/icon/dark/sort.png</Bitmap>
+                    <Bitmap x:Key="CloseIconSource">/Assets/icon/dark/close.png</Bitmap>
+                    <Bitmap x:Key="AddIconSource">/Assets/icon/dark/add.png</Bitmap>
+                </ResourceDictionary>
+                
+                <!-- Light Theme Values -->
+                <ResourceDictionary x:Key="Light">
+                    <Color x:Key="TitleBarBackground">#f0f0f0</Color>
+                    <Color x:Key="MainBackground">#ffffff</Color>
+                    <Color x:Key="SidebarBackground">#f5f5f5</Color>
+                    <Color x:Key="PanelBackground">#ffffff</Color>
+                    <Color x:Key="ListItemBackground">#f8f8f8</Color>
+                    <Color x:Key="ListItemBackgroundHover">#f0f0f0</Color>
+                    <Color x:Key="TextBoxBackground">#ffffff</Color>
+                    <Color x:Key="HeaderBackground">#f5f5f5</Color>
+                    <Color x:Key="StatusBarBackground">#f0f0f0</Color>
+                    <Color x:Key="DividerColor">#e0e0e0</Color>
+                    <Color x:Key="TextColor">#202020</Color>
+                    <Color x:Key="SecondaryTextColor">#666666</Color>                    <!-- Add Bitmap resource for light theme -->
+                    <Bitmap x:Key="SortIconSource">/Assets/icon/light/sort.png</Bitmap>
+                    <Bitmap x:Key="CloseIconSource">/Assets/icon/light/close.png</Bitmap>
+                    <Bitmap x:Key="AddIconSource">/Assets/icon/light/add.png</Bitmap>
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

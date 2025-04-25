@@ -1,0 +1,57 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="using:SaveVaultApp.ViewModels"
+        xmlns:services="using:SaveVaultApp.Services"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        x:Class="SaveVaultApp.Views.LogViewerWindow"
+        x:DataType="vm:LogViewerViewModel"
+        Title="Error Log Viewer"
+        Width="900" Height="500"
+        Background="#101010"
+        Foreground="White"
+        WindowStartupLocation="CenterOwner">
+    
+    <Grid RowDefinitions="Auto,*,Auto">
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="10">
+            <TextBlock Text="Filter:" VerticalAlignment="Center" Foreground="White"/>
+            <ComboBox Name="LogLevelFilter" Width="100" Background="#202020" Foreground="White">
+                <ComboBoxItem Content="All" Foreground="White"/>
+                <ComboBoxItem Content="Debug" Foreground="White"/>
+                <ComboBoxItem Content="Info" Foreground="White"/>
+                <ComboBoxItem Content="Warning" Foreground="White"/>
+                <ComboBoxItem Content="Error" Foreground="White"/>
+                <ComboBoxItem Content="Critical" Foreground="White"/>
+            </ComboBox>
+            <TextBox Name="SearchFilter" Watermark="Search in logs..." Width="200" Margin="10,0" Background="#202020" Foreground="White"/>
+            <Button Name="ClearLogsButton" Content="Clear Logs" Margin="20,0,0,0" Background="#202020" Foreground="White"/>
+            <TextBlock Text="Press Shift+E to show/hide this window" VerticalAlignment="Center" Margin="20,0,0,0" Opacity="0.7" Foreground="White"/>
+        </StackPanel>
+        
+        <Border Grid.Row="1" Margin="10" BorderThickness="1" BorderBrush="Gray" Background="#000000">
+            <!-- Replace DataGrid with TextBox for direct display -->
+            <TextBox Name="LogTextBox" 
+                     IsReadOnly="True"
+                     Background="#101010" 
+                     Foreground="#FFFFFF"
+                     FontFamily="Consolas, Courier New, monospace"
+                     TextWrapping="Wrap"
+                     AcceptsReturn="True"
+                     FontSize="12"
+                     Padding="10"
+                     VerticalAlignment="Stretch"
+                     HorizontalAlignment="Stretch"
+                     CaretBrush="White"/>
+        </Border>
+        
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="10">
+            <TextBlock Name="StatusText" Grid.Column="0" Text="0 log entries shown" VerticalAlignment="Center" Foreground="White"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                <Button Name="CopyButton" Content="Copy All" Width="100" Background="#202020" Foreground="White"/>
+                <Button Name="SaveButton" Content="Save Logs" Width="100" Background="#202020" Foreground="White"/>
+                <Button Name="CloseButton" Content="Close" Width="80" Background="#202020" Foreground="White"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

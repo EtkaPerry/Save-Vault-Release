@@ -1,27 +1,34 @@
-# Rewrite rules for API routing
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    
-    # If the request starts with "api", route to api.php
-    RewriteCond %{REQUEST_URI} ^/api/.*$ [NC]
-    RewriteRule ^api/(.*)$ api.php [L]
+RewriteEngine On
 
-    # Keep normal requests to index.php
-    # RewriteCond %{REQUEST_URI} !^/api/ [NC]
-    # RewriteRule ^(.*)$ index.php [L]
+# Prevent direct access to sensitive files and directories
+RewriteRule ^site/includes/ - [F,L]
+RewriteRule ^\.git/ - [F,L]
+RewriteRule ^.*\.(?:git|env|log|json|lock|md)$ - [F,L]
+
+# Custom 404 error page
+
+# Handle clean URLs for pages
+
+# API requests pass through unchanged
+RewriteRule ^api/ - [L]
+
+# Allow direct access to assets and .well-known
+RewriteRule ^\.well-known/ - [L]
+
+# Handle assets with clean URLs
+
+# Default page handler
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Security headers
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    Header set Permissions-Policy "geolocation=(), microphone=(), camera=()"
 </IfModule>
 
-# Protect sensitive files
-<Files ~ "^\.(htaccess|htpasswd)$">
-    Order deny,allow
-    Deny from all
-</Files>
-
-# Protect PHP config files
-<Files ~ "\.(php|config\.php|db\.php|jwt_helper\.php)$">
-    Order allow,deny
-    Allow from all
-</Files>
-
-# Disable directory browsing
+# Disable directory listing
 Options -Indexes

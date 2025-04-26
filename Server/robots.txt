@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Allow: /privacy-policy
+Allow: /terms-of-service
+Allow: /about
+Allow: /contact
+
+# Disallow direct access to protected directories
+Disallow: /site/
+Disallow: /server/

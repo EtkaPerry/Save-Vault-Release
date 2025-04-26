@@ -1,7 +1,7 @@
 # Save Vault
 
-![Save Vault Logo](https://img.shields.io/badge/Save%20Vault-Game%20Save%20Manager-blue)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-yellow.svg)](https://www.gnu.org/licenses/agpl-3.0)
+![Save Vault Logo](https://img.shields.io/badge/Save%20Vault-Game%20Save%20Manager-yellow)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-A1CDF1.svg)](https://www.gnu.org/licenses/agpl-3.0)
 ![Status](https://img.shields.io/badge/Status-Alpha-orange)
 
 Save Vault is an automatic game save backup manager that helps protect your precious game progress from corruption, accidental deletion, or hardware failures.
@@ -14,7 +14,7 @@ Save Vault is an automatic game save backup manager that helps protect your prec
 
 Save Vault automatically detects installed games on your system and creates backups of your save files on a customizable schedule. Never lose hours of gameplay again!
 
-![Save Vault Screenshot](http://vault.etka.co.uk/img/SaveVaultApp.png)
+![Save Vault Screenshot](https://vault.etka.co.uk/site/assets/img/app-screenshot.png)
 
 ## ✨ Features
 
@@ -31,7 +31,7 @@ Save Vault automatically detects installed games on your system and creates back
   - Easy restore functionality
 - **System Tray Integration**: Runs in the background with minimal resource usage
 - **Dark/Light Theme Support**: Adapts to your system preferences
-- **Cloud Sync**: Synchronize your save backups across multiple devices (with account)
+- **Cloud Sync**: Synchronize your save options across multiple devices (with account)
 - **Detailed Logging**: Comprehensive logging system for troubleshooting
 
 ## 🚀 Getting Started
@@ -43,9 +43,9 @@ Save Vault automatically detects installed games on your system and creates back
 
 ### Installation
 
-1. Download the latest release from [GitHub Releases](https://github.com/yourusername/Save-Vault-Release/releases)
+1. Download the latest release from [GitHub Releases](https://github.com/EtkaPerry/Save-Vault-Release/releases)
 2. Extract the ZIP file to a location of your choice
-3. Run `SaveVaultApp.exe`
+3. Run `Save Vault.exe`
 
 ## 🔧 Usage
 
@@ -87,7 +87,6 @@ However, as this is my first C# project, I recommend:
 
 - Save Vault works best with games that store saves in standard locations
 - Some games with unusual save mechanisms may not be fully compatible
-- Cloud sync requires an internet connection and valid account
 - As a alpha product, many features are still in development or may not work as expected
 - For a complete list of planned features and known issues, please check the [project board](https://github.com/users/EtkaPerry/projects/6)
 

@@ -37,6 +37,11 @@ $requestMethod = $_SERVER['REQUEST_METHOD'];
 $path = parse_url($requestUri, PHP_URL_PATH);
 $path = str_replace('/api/', '', $path);
 
+// Handle additional URI format possibilities - Support both /api/login and just /login
+if (strpos($path, 'api/') === 0) {
+    $path = str_replace('api/', '', $path);
+}
+
 // Get authorization header for protected routes
 $authHeader = null;
 if (isset($_SERVER['HTTP_AUTHORIZATION'])) {

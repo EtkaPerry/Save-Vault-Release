@@ -45,6 +45,8 @@ Save Vault automatically detects installed games on your system and creates back
 2. Extract the ZIP file to a location of your choice
 3. Run `Save Vault.exe`
 
+> **Note:** The application is not currently code signed. When running the application, you may see security warnings from Windows SmartScreen or your antivirus software. You can safely proceed by clicking "More info" and then "Run anyway" in Windows SmartScreen, or by adding an exception in your antivirus software.
+
 ## 🔧 Usage
 
 1. **First Launch**: Save Vault will scan your system for games and applications

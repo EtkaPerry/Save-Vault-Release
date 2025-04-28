@@ -31,8 +31,6 @@ Save Vault automatically detects installed games on your system and creates back
   - Easy restore functionality
 - **System Tray Integration**: Runs in the background with minimal resource usage
 - **Dark/Light Theme Support**: Adapts to your system preferences
-- **Cloud Sync**: Synchronize your save options across multiple devices (with account)
-- **Detailed Logging**: Comprehensive logging system for troubleshooting
 
 ## 🚀 Getting Started
 

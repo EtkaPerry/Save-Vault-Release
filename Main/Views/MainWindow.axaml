@@ -35,13 +35,15 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            
-            <!-- Menu -->
+              <!-- Menu -->
             <Menu Grid.Column="0" Background="Transparent" Height="30">
                 <MenuItem Header="File">
                     <MenuItem Header="Exit" Command="{Binding ExitApplicationCommand}"/>
                 </MenuItem>
                 <MenuItem Header="Options" Name="OptionsMenuItem"/>
+                <MenuItem Header="Tools">
+                    <MenuItem Header="Log Viewer" Command="{Binding OpenLogViewerCommand}"/>
+                </MenuItem>
             </Menu>
             
             <!-- Window Title - This area will be used for window dragging -->

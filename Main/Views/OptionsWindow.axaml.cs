@@ -8,6 +8,7 @@ using System.IO;
 using System;
 using System.Threading.Tasks;
 using Avalonia.Controls.Primitives;
+using Avalonia.Markup.Xaml; // Add this using statement for AvaloniaXamlLoader
 
 namespace SaveVaultApp.Views;
 
@@ -120,6 +121,11 @@ public partial class OptionsWindow : Window
         }
     }
     
+    private void InitializeComponent()
+    {
+        AvaloniaXamlLoader.Load(this);
+    }
+
     // Set the main view model reference and initialize settings
     public void SetMainViewModel(MainWindowViewModel viewModel)
     {
@@ -208,21 +214,19 @@ public partial class OptionsWindow : Window
     private async void ResetCacheButton_Click(object? sender, RoutedEventArgs e)
     {
         if (_mainViewModel != null)
-        {
-            var messageBox = new Window
+        {            var messageBox = new Window
             {
-                Width = 300,
-                Height = 150,
+                Width = 400,
+                Height = 200,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Title = "Confirm Reset Program Cache",
                 Content = new StackPanel
                 {
                     Margin = new Avalonia.Thickness(20),
                     Children =
-                    {
-                        new TextBlock
+                    {                        new TextBlock
                         {
-                            Text = "This will clear the program cache and re-scan all drives for applications. This might take a while. Continue?",
+                            Text = "This will completely reset the program cache including all detected games, save paths, backup history and search data. The system will re-scan all drives for applications. This might take a while. Continue?",
                             TextWrapping = Avalonia.Media.TextWrapping.Wrap,
                             Margin = new Avalonia.Thickness(0, 0, 0, 20)
                         },

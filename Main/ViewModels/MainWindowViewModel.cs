@@ -696,9 +696,7 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             SelectedApp = InstalledApps.FirstOrDefault(a => a.ExecutablePath == previouslySelectedApp.ExecutablePath);
         }
-    }
-
-    private void HandleSearchTextChanged(string value)
+    }    private void HandleSearchTextChanged(string value)
     {
         var previouslySelectedApp = SelectedApp;
 
@@ -709,11 +707,43 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        // Get all matching apps
-        var matchingApps = AllInstalledApps
-            .Where(app => app.Name.Contains(value, StringComparison.OrdinalIgnoreCase) || 
-                         app.ExecutablePath.Contains(value, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        // Tokenize the search query for multi-term searching
+        string[] searchTerms = Utilities.FuzzySearch.TokenizeQuery(value);
+        
+        // Create a sorted list with scoring for each app
+        var scoredApps = AllInstalledApps.Select(app => 
+        {
+            // Get best match score for app name against all search terms
+            var nameScores = searchTerms.Select(term => 
+                Utilities.FuzzySearch.Match(app.Name, term)).ToList();
+            
+            // Get best match score for executable path against all search terms
+            var pathScores = searchTerms.Select(term => 
+                Utilities.FuzzySearch.Match(Path.GetFileName(app.ExecutablePath), term)).ToList();
+            
+            // Use the best match from either name or path
+            var bestScore = nameScores.Concat(pathScores)
+                .Where(score => score.IsMatch)
+                .OrderBy(score => score.MatchType)
+                .ThenBy(score => score.Score)
+                .FirstOrDefault();
+            
+            return new 
+            {
+                App = app,
+                MatchResult = bestScore,
+                // Require all terms to match for multi-term queries
+                IsMatch = bestScore != null && bestScore.IsMatch && 
+                          searchTerms.All(term => 
+                              nameScores.Any(s => s.IsMatch) || pathScores.Any(s => s.IsMatch))
+            };
+        })
+        .Where(result => result.IsMatch)
+        .OrderBy(result => result.MatchResult?.MatchType ?? Utilities.FuzzySearch.MatchType.NoMatch)
+        .ThenBy(result => result.MatchResult?.Score ?? int.MaxValue)
+        .ToList();
+        
+        var matchingApps = scoredApps.Select(result => result.App).ToList();
 
         // Update both collections
         InstalledApps.Clear();
@@ -770,20 +800,28 @@ public partial class MainWindowViewModel : ViewModelBase
             InstalledApps.Clear();
             HiddenGames.Clear();
             AllInstalledApps.Clear();
-        });
-
-        // If there is no cache, do a full search immediately
+        });        // If there is no cache, do a full search immediately
         if (_settings.KnownApplicationPaths == null || _settings.KnownApplicationPaths.Count == 0)
         {
             var foundApps = new ObservableCollection<ApplicationInfo>();
             if (OperatingSystem.IsWindows())
             {
-                SearchForExecutables(foundApps);
+                // Use the enhanced application scanner for better program discovery
+                try
+                {
+                    Services.LoggingService.Instance.Info("Starting enhanced application discovery scan...");
+                    Helpers.ApplicationScanner.FindInstalledApplications(foundApps, _settings);
+                }
+                catch (Exception ex)
+                {
+                    Services.LoggingService.Instance.Error($"Error in enhanced application scan: {ex.Message}");
+                    // Fall back to original method if the enhanced one fails
+                    SearchForExecutables(foundApps);
+                }
             }
             // Add found apps to AllInstalledApps and UI collections
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                foreach (var app in foundApps)
+            {foreach (var app in foundApps)
                 {
                     AllInstalledApps.Add(app);
                     if (app.IsHidden)
@@ -793,10 +831,57 @@ public partial class MainWindowViewModel : ViewModelBase
                     // Save to cache for next time
                     if (_settings.KnownApplicationPaths != null && !_settings.KnownApplicationPaths.Contains(app.ExecutablePath))
                         _settings.KnownApplicationPaths.Add(app.ExecutablePath);
-                }
-                ApplySort();
+                }                ApplySort();
                 IsLoading = false;
-                StatusMessage = $"Found {InstalledApps.Count} applications ({HiddenGames.Count} hidden)";
+                
+                // Count programs with detected save locations and known games
+                int totalPrograms = AllInstalledApps.Count;
+                int knownGames = AllInstalledApps.Count(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath));
+                int withSaveLocations = AllInstalledApps.Count(app => !string.IsNullOrEmpty(app.SavePath) && app.SavePath != "Unknown");
+                
+                // Update status message with detailed stats
+                string statusMessage = $"Found {totalPrograms} programs, {knownGames} known games, {withSaveLocations} with save location";
+                StatusMessage = statusMessage;
+                Debug.WriteLine(statusMessage);
+                
+                // Log to the log viewer with additional details about games with no save location
+                int noSaveLocations = knownGames - withSaveLocations;
+                string logMessage = $"Application scan completed: {totalPrograms} programs, {knownGames} known games, {noSaveLocations} games with no save location";
+                Services.LoggingService.Instance.Info(logMessage);
+                
+                // If there are known games with no save location, log them specifically
+                if (noSaveLocations > 0)
+                {
+                    var gamesWithNoSaveLocation = AllInstalledApps
+                        .Where(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath) &&
+                               (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown"))
+                        .ToList();
+                    
+                    if (gamesWithNoSaveLocation.Any())
+                    {
+                        // Get the list of games with no save location, sorted alphabetically
+                        string noSaveLocationList = string.Join(", ", gamesWithNoSaveLocation
+                            .Select(app => app.Name)
+                            .OrderBy(name => name));
+                        
+                        // Split into multiple log messages if the list is too long
+                        if (noSaveLocationList.Length > 500)
+                        {
+                            Services.LoggingService.Instance.Info($"Known games with no save location detected:");
+                            
+                            // Log games in groups to avoid very long lines
+                            foreach (var game in gamesWithNoSaveLocation.OrderBy(app => app.Name))
+                            {
+                                Services.LoggingService.Instance.Info($"  - {game.Name}");
+                            }
+                        }
+                        else
+                        {
+                            Services.LoggingService.Instance.Info($"Known games with no save location detected: {noSaveLocationList}");
+                        }
+                    }
+                }
+                
                 _settings.Save();
             });
             // Start background scan as usual
@@ -860,20 +945,112 @@ public partial class MainWindowViewModel : ViewModelBase
                     HiddenGames.Add(app);
                 else
                     InstalledApps.Add(app);
-            }
-            ApplySort();
+            }            ApplySort();
             IsLoading = false;
-            StatusMessage = $"Found {InstalledApps.Count} applications ({HiddenGames.Count} hidden)";
+            
+            // Count programs with detected save locations and known games
+            int totalPrograms = AllInstalledApps.Count;
+            int knownGames = AllInstalledApps.Count(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath));
+            int withSaveLocations = AllInstalledApps.Count(app => !string.IsNullOrEmpty(app.SavePath) && app.SavePath != "Unknown");
+            
+            // Update status message with detailed stats
+            string statusMessage = $"Found {totalPrograms} programs, {knownGames} known games, {withSaveLocations} with save location";
+            StatusMessage = statusMessage;
+            Debug.WriteLine(statusMessage);
+            
+            // Log to the log viewer with additional details about games with no save location
+            int noSaveLocations = knownGames - withSaveLocations;
+            string logMessage = $"Application scan completed: {totalPrograms} programs, {knownGames} known games, {noSaveLocations} games with no save location";
+            Services.LoggingService.Instance.Info(logMessage);
+            
+            // If there are known games with no save location, log them specifically
+            if (noSaveLocations > 0)
+            {
+                var gamesWithNoSaveLocation = AllInstalledApps
+                    .Where(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath) &&
+                           (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown"))
+                    .ToList();
+                
+                if (gamesWithNoSaveLocation.Any())
+                {
+                    // Get the list of games with no save location, sorted alphabetically
+                    string noSaveLocationList = string.Join(", ", gamesWithNoSaveLocation
+                        .Select(app => app.Name)
+                        .OrderBy(name => name));
+                        
+                    // Split into multiple log messages if the list is too long
+                    if (noSaveLocationList.Length > 500)
+                    {
+                        Services.LoggingService.Instance.Info($"Known games with no save location detected:");
+                        
+                        // Log games in groups to avoid very long lines
+                        foreach (var game in gamesWithNoSaveLocation.OrderBy(app => app.Name))
+                        {
+                            Services.LoggingService.Instance.Info($"  - {game.Name}");
+                        }
+                    }
+                    else
+                    {
+                        Services.LoggingService.Instance.Info($"Known games with no save location detected: {noSaveLocationList}");
+                    }
+                }
+            }
+            
+            _settings.Save();
         });
 
         // 2. Start background scan to validate and update the list
         StartBackgroundAppRefresh();
-    }
-
-    [SupportedOSPlatform("windows")]
+    }    [SupportedOSPlatform("windows")]
     private void SearchForExecutables(ObservableCollection<ApplicationInfo> installedApps)
     {
         var searchPaths = new List<string>();
+        var processedExecutables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        // First scan registry for applications if our utility is available
+        try
+        {
+            Services.LoggingService.Instance.Info("Starting registry scan for installed applications...");
+            var registryExecutables = Utilities.RegistryScanner.ScanRegistryForApplications();
+            
+            foreach (var exePath in registryExecutables)
+            {
+                if (!processedExecutables.Contains(exePath) && File.Exists(exePath))
+                {
+                    try
+                    {
+                        var fileInfo = new FileInfo(exePath);
+                        if (!ShouldSkipExecutable(fileInfo))
+                        {
+                            processedExecutables.Add(exePath);
+                            
+                            // Add to apps if not already present
+                            string appName = Path.GetFileNameWithoutExtension(exePath);
+                            if (!installedApps.Any(a => string.Equals(a.ExecutablePath, exePath, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                installedApps.Add(new ApplicationInfo(_settings)
+                                {
+                                    Name = appName,
+                                    Path = Path.GetDirectoryName(exePath) ?? string.Empty,
+                                    ExecutablePath = exePath
+                                });
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Error processing registry executable {exePath}: {ex.Message}");
+                    }
+                }
+            }
+            
+            Services.LoggingService.Instance.Info($"Registry scan found {registryExecutables.Count} executables");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error during registry scan: {ex.Message}");
+            Services.LoggingService.Instance.Error($"Error during registry scan: {ex.Message}");
+        }
         
         // Check all possible drive letters from A to Z
         for (char driveLetter = 'A'; driveLetter <= 'Z'; driveLetter++)
@@ -1079,33 +1256,49 @@ public partial class MainWindowViewModel : ViewModelBase
                 Debug.WriteLine($"Error accessing drive {drivePath}: {ex.Message}");
                 continue;
             }
-        }
-
-        // Add user profile paths that might be on any drive
+        }        // Add user profile paths that might be on any drive
         var userPaths = new[]
         {
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFilesX86),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Games"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "My Games"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Saved Games"),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Games"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Games")
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Games"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Steam"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Epic Games"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Epic Games"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "GOG Galaxy"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "GOG Galaxy"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Origin Games"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Origin Games"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Ubisoft"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Ubisoft"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Xbox Games"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps")
         };
         searchPaths.AddRange(userPaths.Where(Directory.Exists));
 
-        // Process each search path
-        var processedExecutables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Log the search paths
+        Services.LoggingService.Instance.Info($"Searching {searchPaths.Count} paths for applications...");
+            
+        // Process each search path, using the existing processedExecutables to avoid duplicates
         foreach (var searchPath in searchPaths.Distinct())
         {
             if (!Directory.Exists(searchPath))
             {
                 continue;
             }
-            
-            try
+              try
             {
                 SearchDirectoryForExecutables(searchPath, installedApps, processedExecutables);
             }
@@ -1129,68 +1322,48 @@ public partial class MainWindowViewModel : ViewModelBase
                pathLower.Contains("rockstar") ||
                pathLower.EndsWith("bin") ||
                pathLower.EndsWith("binaries");
-    }
-
-    private bool ShouldSkipExecutable(FileInfo fileInfo)
+    }    private bool ShouldSkipExecutable(FileInfo fileInfo)
     {
         string fileName = fileInfo.Name.ToLowerInvariant();
         string dirName = Path.GetFileName(fileInfo.DirectoryName ?? string.Empty).ToLowerInvariant();
         string fullPath = fileInfo.FullName.ToLowerInvariant();
+        
+        // Don't skip files in game-related directories
+        bool isInGamesDir = IsLikelyGamePath(fileInfo.DirectoryName ?? string.Empty);
+        if (isInGamesDir)
+        {
+            return false; // Never skip executables in game directories
+        }
 
-        // Skip browser-related executables and their components
-        if (fileName.Contains("chrome") ||
-            fileName.Contains("firefox") ||
-            fileName.Contains("edge") ||
-            fileName.Contains("opera") ||
-            fileName.Contains("brave") ||
-            fileName.Contains("mozilla") ||
-            fileName.Contains("iexplore") ||
-            fileName.Contains("msedge") ||
-            fileName.Contains("browser") ||
-            fileName.Contains("webview") ||
-            fileName.Contains("extension") ||
-            fileName.Contains("plugin") ||
-            fileName.Contains("crashreport") ||
-            fileName.Contains("updater") ||
-            fileName.Contains("notification") ||
-            fileName.Contains("gecko") ||
-            fileName.Contains("chromium") ||
-            fileName.Contains("electron") ||
-            fileName.Contains("webkit") ||
-            fileName.Contains("renderer") ||
-            fileName.Contains("debugger") ||
-            fileName.Contains("remoting") ||
-            fileName.Contains("network") ||
+        // Skip very small files unless they're in a games directory
+        if (fileInfo.Length < 50 * 1024 && !isInGamesDir) // 50 KB minimum unless in games directory
+            return true;
+
+        // Skip browser-related executables with more specific matching to avoid false positives
+        // Check exact filename matches or specific endings rather than substring matches
+        if ((fileName == "chrome.exe" ||
+            fileName == "firefox.exe" ||
+            fileName == "msedge.exe" ||
+            fileName == "opera.exe" ||
+            fileName == "brave.exe" ||
+            fileName == "iexplore.exe" ||
+            fileName.EndsWith("browser.exe")) ||
+            fileName.EndsWith("webview.exe") ||
+            fileName.EndsWith("extension.exe") ||
+            fileName.EndsWith("plugin.exe") ||
+            fileName.EndsWith("crashreport.exe") ||
+            fileName.EndsWith("updater.exe") ||
+            fileName.EndsWith("notification.exe") ||
             fileName.EndsWith("broker.exe") ||
             fileName.EndsWith("sandbox.exe") ||
             fileName.EndsWith("helper.exe") ||
             fileName.EndsWith("gpu.exe") ||
             fileName.EndsWith("utility.exe") ||
-            fileName.EndsWith("broker.exe") ||
             fileName.EndsWith("crashpad.exe") ||
-            fileName.EndsWith("background.exe") ||
             fileName.EndsWith("render.exe") ||
             fileName.EndsWith("plugin-container.exe") ||
             fileName.EndsWith("notification-helper.exe") ||
-            fileName.EndsWith("process.exe") ||
-            fileName.EndsWith("plugin-process.exe") ||
-            fileName.EndsWith("nativehost.exe") ||
-            fileName.EndsWith("web-helper.exe") ||
-            fileName.EndsWith("web-process.exe") ||
-            fileName.EndsWith("network-service.exe") ||
-            fileName.EndsWith("service.exe") ||
-            fileName.EndsWith("app_host.exe") ||
-            fileName.EndsWith("frame_host.exe") ||
-            fileName.EndsWith("watchdog.exe") ||
-            fileName.EndsWith("worker.exe") ||
-            fileName.EndsWith("ui_helper.exe") ||
-            fileName.EndsWith("native_host.exe") ||
-            fileName.EndsWith("service_client.exe") ||
-            fileName.EndsWith("renderer.exe") ||
-            fileName.EndsWith("host.exe") ||
-            fileName.EndsWith("-bin.exe") ||
-            fileName.EndsWith("_helper.exe") ||
-            fileName.EndsWith("subprocess.exe"))
+            fileName.EndsWith("service.exe"))
         {
             return true;
         }
@@ -1203,75 +1376,42 @@ public partial class MainWindowViewModel : ViewModelBase
             fullPath.Contains("\\brave\\") ||
             fullPath.Contains("\\mozilla\\") ||
             fullPath.Contains("\\internet explorer\\") ||
-            fullPath.Contains("\\microsoft\\edge\\") ||
-            fullPath.Contains("\\browser\\") ||
-            fullPath.Contains("\\browsers\\") ||
-            fullPath.Contains("\\extensions\\") ||
-            fullPath.Contains("\\plugins\\") ||
-            fullPath.Contains("\\web store\\") ||
-            fullPath.Contains("\\web apps\\") ||
-            fullPath.Contains("\\native messaging hosts\\") ||
-            fullPath.Contains("\\native-messaging-hosts\\") ||
-            fullPath.Contains("\\browser extensions\\") ||
-            fullPath.Contains("\\browser plugins\\") ||
-            fullPath.Contains("\\browser components\\") ||
-            fullPath.Contains("\\user data\\") ||
-            fullPath.Contains("\\browser cache\\") ||
-            fullPath.Contains("\\browser data\\") ||
-            fullPath.Contains("\\web data\\") ||
-            fullPath.Contains("\\temp browser\\"))
+            fullPath.Contains("\\microsoft\\edge\\"))
         {
             return true;
         }
 
-        // Skip very small files unless they're in a games directory
-        bool isInGamesDir = IsLikelyGamePath(fileInfo.DirectoryName ?? string.Empty);
-        if (fileInfo.Length < 50 * 1024 && !isInGamesDir) // 50 KB minimum unless in games directory
-            return true;
-
-        // Skip common installer, uninstaller, and updater patterns
-        if (fileName.Contains("setup") ||
-            fileName.Contains("install") ||
-            fileName.Contains("update") ||
-            fileName.Contains("patch") ||
-            fileName.Contains("repair") ||
-            fileName.Contains("unins") ||
-            fileName.Contains("helper") ||
-            fileName.Contains("crash") ||
-            fileName.Contains("report") ||
-            fileName.Contains("config") ||
-            fileName.Contains("service") ||
-            fileName.Contains("vcredist") ||
-            fileName.Contains(".tmp") ||
-            fileName.Contains("bootstrapper") ||
-            fileName.Contains("cleanup") ||
-            fileName.Contains("debug") ||
-            fileName.Contains("diagnostic") ||
-            fileName.Contains("launcher") && fileInfo.Length < 1024 * 1024) // Skip small launchers
+        // Skip basic installer/uninstaller patterns, but be more selective
+        if ((fileName.StartsWith("unins") && fileName.EndsWith(".exe")) ||
+            (fileName == "setup.exe" && fileInfo.Length < 5 * 1024 * 1024) || // Small setup files
+            (fileName == "install.exe" && fileInfo.Length < 5 * 1024 * 1024) || // Small install files
+            fileName == "vcredist.exe" ||
+            fileName.EndsWith("_setup.exe") || 
+            fileName.EndsWith("_installer.exe"))
         {
             return true;
         }
 
-        // Skip executables in directories commonly associated with installers or temporary files
-        if (dirName.Contains("installer") ||
-            dirName.Contains("temp") ||
-            dirName.Contains("tmp") ||
-            dirName.Contains("cache") ||
-            dirName.Contains("update") ||
-            dirName.Contains("patch") ||
-            dirName.Contains("setup") ||
-            dirName.Contains("install") ||
-            dirName.Contains("uninstall") ||
-            dirName.Contains("vcredist") ||
-            dirName.Contains("redist") ||
-            dirName.Contains("debug") ||
-            dirName.Contains("diagnostic"))
+        // Skip executables in directories specifically for installers
+        if (dirName == "installer" ||
+            dirName == "temp" ||
+            dirName == "tmp" ||
+            dirName == "cache" ||
+            dirName == "vcredist" ||
+            dirName == "redist" ||
+            dirName == "uninstall")
         {
             return true;
         }
 
-        // Allow executables that are likely games
-        return !IsLikelyGameExecutable(fileName, dirName);
+        // If it's a likely game executable, don't skip it
+        if (IsLikelyGameExecutable(fileName, dirName))
+        {
+            return false;
+        }
+        
+        // By default, don't skip - we want to be inclusive rather than exclusive
+        return false;
     }
 
     private bool IsLikelyGameExecutable(string fileName, string dirName)
@@ -1356,10 +1496,21 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             Debug.WriteLine($"Error searching directory {directory}: {ex.Message}");
         }
-    }
-
-    private void ProcessExecutablesInDirectory(string directory, ObservableCollection<ApplicationInfo> apps, HashSet<string> processedExecutables)
+    }    private void ProcessExecutablesInDirectory(string directory, ObservableCollection<ApplicationInfo> apps, HashSet<string> processedExecutables)
     {
+        // Track executables by their filename (without path) to avoid multiple entries for the same program
+        var executableNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        
+        // First build a map of executable names from existing apps
+        foreach (var app in apps)
+        {
+            string exeName = Path.GetFileName(app.ExecutablePath);
+            if (!string.IsNullOrEmpty(exeName) && !executableNameMap.ContainsKey(exeName))
+            {
+                executableNameMap[exeName] = app.ExecutablePath;
+            }
+        }
+        
         foreach (var exePath in Directory.GetFiles(directory, "*.exe"))
         {
             if (processedExecutables.Contains(exePath))
@@ -1374,8 +1525,27 @@ public partial class MainWindowViewModel : ViewModelBase
                 if (ShouldSkipExecutable(fileInfo))
                     continue;
 
+                string exeName = Path.GetFileName(exePath);
                 string appName = Path.GetFileNameWithoutExtension(exePath);
                 
+                // Skip if we already have an application with this exact executable name
+                if (executableNameMap.ContainsKey(exeName))
+                {
+                    Debug.WriteLine($"Skipping duplicate executable: {exePath} (already have {exeName})");
+                    continue;
+                }
+                
+                // Also skip if it's known game to avoid duplicates
+                if (Utilities.SaveLocationDetector.IsKnownGame(exePath))
+                {
+                    Debug.WriteLine($"Skipping {exePath} as it's already identified as a known game");
+                    continue;
+                }
+                
+                // Add to our tracking maps
+                executableNameMap[exeName] = exePath;
+                
+                // Add to apps if not already present 
                 if (!apps.Any(a => string.Equals(a.ExecutablePath, exePath, StringComparison.OrdinalIgnoreCase)))
                 {
                     apps.Add(new ApplicationInfo(_settings)
@@ -1391,9 +1561,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 Debug.WriteLine($"Error processing executable {exePath}: {ex.Message}");
             }
         }
-    }
-
-    private bool ShouldSkipDirectory(string directory)
+    }    private bool ShouldSkipDirectory(string directory)
     {
         string dirLower = directory.ToLowerInvariant();
         string dirName = Path.GetFileName(directory).ToLowerInvariant();
@@ -1407,29 +1575,41 @@ public partial class MainWindowViewModel : ViewModelBase
             return true;
         }
         
-        // Skip browser-related directories
-        if (dirLower.Contains("chrome") ||
-            dirLower.Contains("firefox") ||
-            dirLower.Contains("edge") ||
-            dirLower.Contains("opera") ||
-            dirLower.Contains("brave") ||
-            dirLower.Contains("mozilla") ||
-            dirLower.Contains("internet explorer") ||
-            dirLower.Contains("browser") ||
-            dirLower.Contains("webview"))
+        // Never skip game-related directories
+        if (dirLower.Contains("game") ||
+            dirLower.Contains("steam") ||
+            dirLower.Contains("gog") ||
+            dirLower.Contains("epic") ||
+            dirLower.Contains("origin") ||
+            dirLower.Contains("ubisoft") ||
+            dirLower.Contains("bethesda") ||
+            dirLower.Contains("rockstar") ||
+            dirLower.EndsWith("bin") ||
+            dirLower.EndsWith("binaries") ||
+            dirLower.EndsWith("program files") ||
+            dirLower.EndsWith("program files (x86)"))
+        {
+            return false;
+        }
+        
+        // Skip browser-related directories with exact name matching
+        if (dirName == "chrome" || 
+            dirName == "firefox" ||
+            dirName == "edge" ||
+            dirName == "opera" ||
+            dirName == "brave" ||
+            dirName == "mozilla" ||
+            dirName == "internet explorer")
         {
             return true;
         }
 
-        // Skip helper and utility applications
-        if (dirName.Contains("helper") ||
-            dirName.Contains("utility") ||
-            dirName.Contains("assistant") ||
-            dirName.Contains("plugin") ||
-            dirName.Contains("extension") ||
-            dirName.Contains("service") ||
-            dirName.Contains("daemon") ||
-            dirName.Contains("runtime"))
+        // Skip specific utility directories, but be more conservative
+        if (dirName == "helper" ||
+            dirName == "utility" ||
+            dirName == "assistant" ||
+            dirName == "plugin" ||
+            dirName == "extension")
         {
             return true;
         }
@@ -1509,145 +1689,23 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         
         return false;
-    }
-
-    private string DetectSavePath(ApplicationInfo app)
+    }    private string DetectSavePath(ApplicationInfo app)
     {
-        // Extract useful information for path detection
-        string appName = app.Name;
-        string appNameLower = appName.ToLowerInvariant();
-        string execDir = Path.GetDirectoryName(app.ExecutablePath) ?? string.Empty;
+        // Use the new SaveLocationDetector utility class to detect save paths
+        var result = Utilities.SaveLocationDetector.DetectSavePath(app);
         
-        // Game-specific save path detection
-        if (appNameLower.Contains("steam") || execDir.Contains("steam", StringComparison.OrdinalIgnoreCase))
+        // Update the app name if one was provided from KnownGames.json
+        if (!string.IsNullOrEmpty(result.GameName))
         {
-            // For Steam games, try to find the Steam userdata folder
-            string? steamPath = Path.GetDirectoryName(execDir);
-            if (!string.IsNullOrEmpty(steamPath) && Directory.Exists(Path.Combine(steamPath, "userdata")))
+            // Only update if not already customized by the user
+            if (!_settings.CustomNames.ContainsKey(app.ExecutablePath))
             {
-                return Path.Combine(steamPath, "userdata");
+                app.Name = result.GameName;
             }
         }
         
-        // Special cases for common games
-        if (appNameLower.Contains("minecraft"))
-        {
-            string minecraftPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), ".minecraft");
-            if (Directory.Exists(minecraftPath))
-            {
-                return minecraftPath;
-            }
-        }
-        
-        // Check for Epic Games
-        if (appNameLower.Contains("epic games") || execDir.Contains("epic games", StringComparison.OrdinalIgnoreCase))
-        {
-            // Epic Games save paths often in LocalAppData/[GameName]
-            string epicSavesPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), appName);
-            if (Directory.Exists(epicSavesPath))
-            {
-                return epicSavesPath;
-            }
-        }
-        
-        // EA Games often save in Documents/Electronic Arts/[GameName]
-        string eaPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Electronic Arts", appName);
-        if (Directory.Exists(eaPath))
-        {
-            return eaPath;
-        }
-        
-        // Ubisoft games
-        string ubisoftPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Ubisoft", appName);
-        if (Directory.Exists(ubisoftPath))
-        {
-            return ubisoftPath;
-        }
-        
-        // Check for common patterns with different forms of the app name
-        // Try without spaces or special characters
-        string simplifiedName = new string(appName.Where(c => !char.IsPunctuation(c) && !char.IsWhiteSpace(c)).ToArray());
-        
-        // Common save path locations - check with various name formats
-        var possiblePaths = new List<string>
-        {
-            // Standard locations with exact app name
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), appName),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), appName),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), appName),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Saved Games", appName),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "My Games", appName),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "My Games", appName),
-            
-            // With simplified name (no spaces or punctuation)
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), simplifiedName),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), simplifiedName),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), simplifiedName),
-            
-            // Check for save folders in installation directory
-            Path.Combine(execDir, "Saves"),
-            Path.Combine(execDir, "SavedGames"),
-            Path.Combine(execDir, "SaveGames"),
-            Path.Combine(execDir, "save"),
-            Path.Combine(execDir, "saves"),
-            Path.Combine(execDir, "savegame"),
-            Path.Combine(execDir, "savegames"),
-            Path.Combine(execDir, "data", "saves"),
-            
-            // Additional common patterns
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SaveGames", appName),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", appName), // For Linux compatibility
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config", simplifiedName),
-            
-            // Try parent directory of the executable
-            Path.Combine(Directory.GetParent(execDir)?.FullName ?? execDir, "Saves"),
-            Path.Combine(Directory.GetParent(execDir)?.FullName ?? execDir, "SavedGames")
-        };
-
-        foreach (var path in possiblePaths)
-        {
-            if (Directory.Exists(path))
-            {
-                Debug.WriteLine($"Found save path for {appName}: {path}");
-                return path;
-            }
-        }
-        
-        // Look for folders with "save" in the name in the installation directory
-        try
-        {
-            var potentialSaveDirs = Directory.GetDirectories(execDir)
-                .Where(dir => Path.GetFileName(dir).ToLowerInvariant().Contains("save"))
-                .ToList();
-                
-            if (potentialSaveDirs.Count > 0)
-            {
-                return potentialSaveDirs.First();
-            }
-            
-            // Also check the parent directory
-            string parentDir = Directory.GetParent(execDir)?.FullName ?? string.Empty;
-            if (Directory.Exists(parentDir))
-            {
-                potentialSaveDirs = Directory.GetDirectories(parentDir)
-                    .Where(dir => Path.GetFileName(dir).ToLowerInvariant().Contains("save"))
-                    .ToList();
-                    
-                if (potentialSaveDirs.Count > 0)
-                {
-                    return potentialSaveDirs.First();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Error searching for save directories: {ex.Message}");
-        }
-
-        return "Unknown"; // Default if no save path is found
-    }
-
-    [RelayCommand]
+        return result.SavePath;
+    }[RelayCommand]
     public void ResetCache()
     {
         // Clear all saved data in settings
@@ -1655,10 +1713,13 @@ public partial class MainWindowViewModel : ViewModelBase
         _settings.CustomNames.Clear();
         _settings.CustomSavePaths.Clear();
         _settings.HiddenApps.Clear();
+        _settings.KnownApplicationPaths.Clear(); // Clear known applications cache
+        _settings.BackupHistory.Clear(); // Clear backup history
+        _settings.AppSettings.Clear(); // Clear app-specific settings
         _settings.Save();
         
         // Update UI status
-        StatusMessage = "Rescanning applications...";
+        StatusMessage = "Completely resetting program cache and rescanning...";
         IsLoading = true;
         
         // Clear current cached apps
@@ -1667,7 +1728,21 @@ public partial class MainWindowViewModel : ViewModelBase
         HiddenGames.Clear();
         RunningApps.Clear();
         
-        // Run the scan again
+        // Log that the cache was reset
+        Debug.WriteLine("Cache reset initiated. All application data cleared.");
+          // Force the SaveLocationDetector to reload KnownGames.json
+        try
+        {
+            Utilities.SaveLocationDetector.ReloadKnownGames();
+            int knownGamesCount = Utilities.SaveLocationDetector.GetKnownGamesCount();
+            Debug.WriteLine($"Known games definitions reloaded. {knownGamesCount} game definitions available.");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error reloading known games: {ex.Message}");
+        }
+        
+        // Run the scan again from scratch
         Task.Run(async () =>
         {
             await LoadInstalledAppsAsync();
@@ -2445,7 +2520,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private void SaveNow()
     {
         if (SelectedApp != null && !string.IsNullOrEmpty(SelectedApp.SavePath) && 
-            SelectedApp.SavePath != "Unknown" && Directory.Exists(SelectedApp.SavePath))
+            SelectedApp.SavePath != "Unknown" && Directory.Exists( SelectedApp.SavePath))
         {
             // Generate backup folder path (app-specific)
             string appBackupFolder = Path.Combine(_backupRootFolder, SanitizePathName(SelectedApp.Name));
@@ -2586,19 +2661,25 @@ public partial class MainWindowViewModel : ViewModelBase
                 var newApps = new ObservableCollection<ApplicationInfo>();
                 
                 if (OperatingSystem.IsWindows())
-                {
-                    // Create a hash set of existing paths for quick lookup
+                {                    // Create a hash set of existing paths for quick lookup
                     var existingPaths = new HashSet<string>(
                         AllInstalledApps.Select(a => a.ExecutablePath),
+                        StringComparer.OrdinalIgnoreCase
+                    );
+                    
+                    // Create a hash set of executable filenames to avoid duplicates by executable name
+                    var existingExeNames = new HashSet<string>(
+                        AllInstalledApps.Select(a => Path.GetFileName(a.ExecutablePath)),
                         StringComparer.OrdinalIgnoreCase
                     );
                     
                     // Scan for new applications without affecting existing ones
                     SearchForExecutables(newApps);
                     
-                    // Only process apps that aren't already in our list
+                    // Only process apps that aren't already in our list by path or executable name
                     var actuallyNewApps = newApps.Where(newApp => 
-                        !existingPaths.Contains(newApp.ExecutablePath)).ToList();
+                        !existingPaths.Contains(newApp.ExecutablePath) && 
+                        !existingExeNames.Contains(Path.GetFileName(newApp.ExecutablePath))).ToList();
                         
                     if (actuallyNewApps.Count > 0)
                     {
@@ -2654,15 +2735,21 @@ public partial class MainWindowViewModel : ViewModelBase
                                 // Save this app's path in known applications
                                 _settings.KnownApplicationPaths.Add(newApp.ExecutablePath);
                             }
-                            
-                            // Apply sort only at the end
+                              // Apply sort only at the end
                             ApplySort();
                             
                             // Save settings to persist the new apps
                             _settings.Save();
                             
-                            // Update status
-                            StatusMessage = $"Found {actuallyNewApps.Count} new applications";
+                            // Calculate statistics after new apps are added
+                            int totalPrograms = AllInstalledApps.Count;
+                            int knownGames = AllInstalledApps.Count(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath));
+                            int withSaveLocations = AllInstalledApps.Count(app => !string.IsNullOrEmpty(app.SavePath) && app.SavePath != "Unknown");
+                            
+                            // Update status with newly found apps and overall statistics
+                            string statusMessage = $"Found {actuallyNewApps.Count} new applications. Total: {totalPrograms} programs, {knownGames} known games, {withSaveLocations} with save location";
+                            StatusMessage = statusMessage;
+                            Debug.WriteLine(statusMessage);
                         });
                     }
                     else
@@ -2784,6 +2871,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 // Notify UI about login status change
                 this.RaisePropertyChanged(nameof(IsLoggedIn));
                 this.RaisePropertyChanged(nameof(LoginStatusText));
+                this.RaisePropertyChanged(nameof(LoggedInInitial));
             }
             else 
             {
@@ -3067,11 +3155,19 @@ public partial class MainWindowViewModel : ViewModelBase
             StatusMessage = "Executable file does not exist";
             return;
         }
-        
-        // Check if app is already in the list
+          // Check if app is already in the list - by path
         if (AllInstalledApps.Any(app => string.Equals(app.ExecutablePath, NewAppExecutablePath, StringComparison.OrdinalIgnoreCase)))
         {
             StatusMessage = "This application is already in your list";
+            CloseAddAppPanel();
+            return;
+        }
+        
+        // Also check by executable name to avoid duplicates
+        string newExeName = Path.GetFileName(NewAppExecutablePath);
+        if (AllInstalledApps.Any(app => string.Equals(Path.GetFileName(app.ExecutablePath), newExeName, StringComparison.OrdinalIgnoreCase)))
+        {
+            StatusMessage = $"An application with executable name '{newExeName}' is already in your list";
             CloseAddAppPanel();
             return;
         }
@@ -3129,6 +3225,21 @@ public partial class MainWindowViewModel : ViewModelBase
     
     public IRelayCommand ShowAddAppPanelCommand => ShowAddAppPanelCommandImpl ??= new RelayCommand(ShowAddAppPanel);
     private IRelayCommand? ShowAddAppPanelCommandImpl;
+      public IRelayCommand OpenLogViewerCommand => OpenLogViewerCommandImpl ??= new RelayCommand(OpenLogViewer);
+    private IRelayCommand? OpenLogViewerCommandImpl;
+    
+    private void OpenLogViewer()
+    {
+        var logViewerWindow = new Views.LogViewerWindow();
+        if (_mainWindow != null)
+        {
+            logViewerWindow.ShowDialog(_mainWindow);
+        }
+        else
+        {
+            logViewerWindow.Show();
+        }
+    }
 } 
 
 public class ApplicationInfo : ReactiveObject

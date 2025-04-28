@@ -1,0 +1,37 @@
+[  {
+    "name": "Cyberpunk 2077",
+    "launcher": "Steam",
+    "gameLocation": "\\Steam\\steamapps\\common\\Cyberpunk 2077",
+    "executable": "REDprelauncher.exe",
+    "savePath": {
+      "path": "%USERPROFILE%\\Saved Games\\CD Projekt Red\\Cyberpunk 2077"
+    }
+  },
+  {
+    "name": "Red Dead Redemption 2",
+    "launcher": "Epic Games",
+    "gameLocation": "\\Epic Games\\RedDeadRedemption2",
+    "executable": "RDR2.exe",
+    "savePath": {
+      "path": "%USERPROFILE%\\Documents\\Rockstar Games\\Red Dead Redemption 2\\Profiles"
+    }
+  },  
+  {
+    "name": "Skyrim Special Edition",
+    "launcher": "Steam",
+    "gameLocation": "\\Steam\\steamapps\\common\\Skyrim Special Edition",
+    "executable": "SkyrimSE.exe",
+    "savePath": {
+      "path": "%USERPROFILE%\\Documents\\My Games\\Skyrim Special Edition\\Saves"
+    }
+  },
+  {
+    "name": "Assassin's Creed Valhalla",
+    "launcher": "Ubisoft",
+    "gameLocation": "\\Ubisoft\\Ubisoft Game Launcher\\games\\Assassin's Creed Valhalla",
+    "executable": "ACValhalla.exe",
+    "savePath": {
+      "path": "%USERPROFILE%\\Documents\\Assassin's Creed Valhalla\\Saved Games"
+    }
+  }
+]

@@ -23,11 +23,17 @@ namespace SaveVaultApp.Helpers
         {
             var processedExecutables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             
+            // Helper function to add an app safely on the UI thread
+            void AddAppSafely(ApplicationInfo app)
+            {
+                if (!installedApps.Any(a => string.Equals(a.ExecutablePath, app.ExecutablePath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => installedApps.Add(app));
+                }
+            }
+
             // First look for known games from KnownGames.json
-            CheckKnownGamesFromConfig(installedApps, settings, processedExecutables);
-            
             var searchPaths = new List<string>();
-            
             LoggingService.Instance.Info("Starting enhanced application discovery scan...");
             
             // Then scan the Windows Registry for installed applications
@@ -46,18 +52,16 @@ namespace SaveVaultApp.Helpers
                             if (!ShouldSkipExecutable(fileInfo))
                             {
                                 processedExecutables.Add(exePath);
-                                
-                                // Add to apps if not already present
                                 string appName = Path.GetFileNameWithoutExtension(exePath);
-                                if (!installedApps.Any(a => string.Equals(a.ExecutablePath, exePath, StringComparison.OrdinalIgnoreCase)))
+                                
+                                var app = new ApplicationInfo(settings)
                                 {
-                                    installedApps.Add(new ApplicationInfo(settings)
-                                    {
-                                        Name = appName,
-                                        Path = Path.GetDirectoryName(exePath) ?? string.Empty,
-                                        ExecutablePath = exePath
-                                    });
-                                }
+                                    Name = appName,
+                                    Path = Path.GetDirectoryName(exePath) ?? string.Empty,
+                                    ExecutablePath = exePath
+                                };
+                                
+                                AddAppSafely(app);
                             }
                         }
                         catch (Exception ex)
@@ -219,7 +223,7 @@ namespace SaveVaultApp.Helpers
                 
                 try
                 {
-                    SearchDirectoryForExecutables(searchPath, installedApps, processedExecutables, settings);
+                    SearchDirectoryForExecutables(searchPath, installedApps, processedExecutables, settings, addAppCallback: AddAppSafely);
                 }
                 catch (Exception ex)
                 {
@@ -305,7 +309,7 @@ namespace SaveVaultApp.Helpers
         }
         
         private static void SearchDirectoryForExecutables(string directory, ObservableCollection<ApplicationInfo> apps, 
-            HashSet<string> processedExecutables, Settings settings, int maxDepth = 6, int currentDepth = 0)
+            HashSet<string> processedExecutables, Settings settings, int maxDepth = 6, int currentDepth = 0, Action<ApplicationInfo>? addAppCallback = null)
         {
             if (currentDepth > maxDepth)
                 return;
@@ -323,11 +327,11 @@ namespace SaveVaultApp.Helpers
 
                 foreach (var binFolder in binFolders)
                 {
-                    ProcessExecutablesInDirectory(binFolder, apps, processedExecutables, settings);
+                    ProcessExecutablesInDirectory(binFolder, apps, processedExecutables, settings, addAppCallback);
                 }
 
                 // Then process current directory
-                ProcessExecutablesInDirectory(directory, apps, processedExecutables, settings);
+                ProcessExecutablesInDirectory(directory, apps, processedExecutables, settings, addAppCallback);
                 
                 // Recursively search subdirectories
                 foreach (var subDir in Directory.GetDirectories(directory))
@@ -343,7 +347,7 @@ namespace SaveVaultApp.Helpers
                             continue;
                         }
                         
-                        SearchDirectoryForExecutables(subDir, apps, processedExecutables, settings, maxDepth, currentDepth + 1);
+                        SearchDirectoryForExecutables(subDir, apps, processedExecutables, settings, maxDepth, currentDepth + 1, addAppCallback);
                     }
                     catch (UnauthorizedAccessException)
                     {
@@ -362,7 +366,7 @@ namespace SaveVaultApp.Helpers
         }
         
         private static void ProcessExecutablesInDirectory(string directory, ObservableCollection<ApplicationInfo> apps, 
-            HashSet<string> processedExecutables, Settings settings)
+            HashSet<string> processedExecutables, Settings settings, Action<ApplicationInfo>? addAppCallback = null)
         {
             // Track executables by their filename (without path) to avoid multiple entries for the same program
             var executableNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -382,8 +386,6 @@ namespace SaveVaultApp.Helpers
                 if (processedExecutables.Contains(exePath))
                     continue;
                     
-                processedExecutables.Add(exePath);
-                
                 try
                 {
                     var fileInfo = new FileInfo(exePath);
@@ -403,16 +405,23 @@ namespace SaveVaultApp.Helpers
                     
                     // Add to our tracking maps
                     executableNameMap[exeName] = exePath;
+                    processedExecutables.Add(exePath);
                     
-                    // Add to apps if not already present 
-                    if (!apps.Any(a => string.Equals(a.ExecutablePath, exePath, StringComparison.OrdinalIgnoreCase)))
+                    // Create and add the application
+                    var app = new ApplicationInfo(settings)
                     {
-                        apps.Add(new ApplicationInfo(settings)
-                        {
-                            Name = appName,
-                            Path = Path.GetDirectoryName(exePath) ?? string.Empty,
-                            ExecutablePath = exePath
-                        });
+                        Name = appName,
+                        Path = directory,
+                        ExecutablePath = exePath
+                    };
+
+                    if (addAppCallback != null)
+                    {
+                        addAppCallback(app);
+                    }
+                    else if (!apps.Any(a => string.Equals(a.ExecutablePath, exePath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        apps.Add(app);
                     }
                 }
                 catch (Exception ex)

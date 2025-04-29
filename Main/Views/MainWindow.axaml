@@ -187,7 +187,9 @@
                     <Grid DockPanel.Dock="Top" IsVisible="{Binding IsLoading}">
                         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                             <ProgressBar IsIndeterminate="True" Width="100" Height="4" Margin="0,0,0,10"/>
-                            <TextBlock Text="{Binding StatusMessage}" HorizontalAlignment="Center"/>
+                            <TextBlock Text="{Binding StatusMessage}" 
+                                       HorizontalAlignment="Center"
+                                       TextWrapping="Wrap"/>
                         </StackPanel>
                     </Grid>
 

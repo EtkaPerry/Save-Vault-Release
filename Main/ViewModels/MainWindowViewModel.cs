@@ -480,7 +480,7 @@ public partial class MainWindowViewModel : ViewModelBase
         string invalidChars = new string(Path.GetInvalidFileNameChars());
         string sanitized = string.Join("_", name.Split(invalidChars.ToCharArray(), 
             StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
-            
+
         // Replace spaces with underscores
         return sanitized.Replace(' ', '_');
     }
@@ -771,7 +771,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private List<ApplicationInfo> AllInstalledApps { get; } = new();    
+    private ObservableCollection<ApplicationInfo> AllInstalledApps { get; } = new();    
     private void LoadInstalledApps()
     {
         InstalledApps.Clear();
@@ -794,62 +794,101 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
-            IsLoading = true;
-            StatusMessage = "Loading applications...";
-
             InstalledApps.Clear();
             HiddenGames.Clear();
             AllInstalledApps.Clear();
-        });        // If there is no cache, do a full search immediately
+            IsLoading = true;
+            StatusMessage = "Starting application search...";
+        });
+
+        // If there is no cache, do a full search immediately
         if (_settings.KnownApplicationPaths == null || _settings.KnownApplicationPaths.Count == 0)
         {
-            var foundApps = new ObservableCollection<ApplicationInfo>();
             if (OperatingSystem.IsWindows())
             {
-                // Use the enhanced application scanner for better program discovery
                 try
                 {
                     Services.LoggingService.Instance.Info("Starting enhanced application discovery scan...");
-                    Helpers.ApplicationScanner.FindInstalledApplications(foundApps, _settings);
+                    // Create a temporary collection that will trigger our callback
+                    var tempApps = new ObservableCollection<ApplicationInfo>();
+                    tempApps.CollectionChanged += (sender, e) =>
+                    {
+                        if (e.NewItems != null)
+                        {
+                            foreach (ApplicationInfo app in e.NewItems)
+                            {
+                                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                                {
+                                    AllInstalledApps.Add(app);
+                                    if (app.IsHidden)
+                                        HiddenGames.Add(app);
+                                    else
+                                        InstalledApps.Add(app);
+
+                                    // Save to cache for next time
+                                    if (_settings.KnownApplicationPaths != null && !_settings.KnownApplicationPaths.Contains(app.ExecutablePath))
+                                        _settings.KnownApplicationPaths.Add(app.ExecutablePath);
+
+                                    ApplySort();
+
+                                    // Update status message with progress
+                                    int total = AllInstalledApps.Count;
+                                    int known = AllInstalledApps.Count(a => Utilities.SaveLocationDetector.IsKnownGame(a.ExecutablePath));
+                                    StatusMessage = $"Found {total} programs so far ({known} known games)...";
+                                });
+                            }
+                        }
+                    };
+
+                    // Start the scan with our observable collection
+                    Helpers.ApplicationScanner.FindInstalledApplications(tempApps, _settings);
                 }
                 catch (Exception ex)
                 {
                     Services.LoggingService.Instance.Error($"Error in enhanced application scan: {ex.Message}");
                     // Fall back to original method if the enhanced one fails
-                    SearchForExecutables(foundApps);
+                    var tempApps = new ObservableCollection<ApplicationInfo>();
+                    tempApps.CollectionChanged += (sender, e) =>
+                    {
+                        if (e.NewItems != null)
+                        {
+                            foreach (ApplicationInfo app in e.NewItems)
+                            {
+                                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                                {
+                                    AllInstalledApps.Add(app);
+                                    if (app.IsHidden)
+                                        HiddenGames.Add(app);
+                                    else
+                                        InstalledApps.Add(app);
+                                });
+                            }
+                        }
+                    };
+                    SearchForExecutables(tempApps);
                 }
             }
-            // Add found apps to AllInstalledApps and UI collections
+
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
-            {foreach (var app in foundApps)
-                {
-                    AllInstalledApps.Add(app);
-                    if (app.IsHidden)
-                        HiddenGames.Add(app);
-                    else
-                        InstalledApps.Add(app);
-                    // Save to cache for next time
-                    if (_settings.KnownApplicationPaths != null && !_settings.KnownApplicationPaths.Contains(app.ExecutablePath))
-                        _settings.KnownApplicationPaths.Add(app.ExecutablePath);
-                }                ApplySort();
+            {
                 IsLoading = false;
                 
-                // Count programs with detected save locations and known games
+                // Count final stats
                 int totalPrograms = AllInstalledApps.Count;
                 int knownGames = AllInstalledApps.Count(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath));
                 int withSaveLocations = AllInstalledApps.Count(app => !string.IsNullOrEmpty(app.SavePath) && app.SavePath != "Unknown");
                 
-                // Update status message with detailed stats
+                // Update status message with final stats
                 string statusMessage = $"Found {totalPrograms} programs, {knownGames} known games, {withSaveLocations} with save location";
                 StatusMessage = statusMessage;
                 Debug.WriteLine(statusMessage);
                 
-                // Log to the log viewer with additional details about games with no save location
+                // Log to the log viewer
                 int noSaveLocations = knownGames - withSaveLocations;
                 string logMessage = $"Application scan completed: {totalPrograms} programs, {knownGames} known games, {noSaveLocations} games with no save location";
                 Services.LoggingService.Instance.Info(logMessage);
-                
-                // If there are known games with no save location, log them specifically
+
+                // Log games with no save location if needed
                 if (noSaveLocations > 0)
                 {
                     var gamesWithNoSaveLocation = AllInstalledApps
@@ -859,17 +898,13 @@ public partial class MainWindowViewModel : ViewModelBase
                     
                     if (gamesWithNoSaveLocation.Any())
                     {
-                        // Get the list of games with no save location, sorted alphabetically
                         string noSaveLocationList = string.Join(", ", gamesWithNoSaveLocation
                             .Select(app => app.Name)
                             .OrderBy(name => name));
                         
-                        // Split into multiple log messages if the list is too long
                         if (noSaveLocationList.Length > 500)
                         {
                             Services.LoggingService.Instance.Info($"Known games with no save location detected:");
-                            
-                            // Log games in groups to avoid very long lines
                             foreach (var game in gamesWithNoSaveLocation.OrderBy(app => app.Name))
                             {
                                 Services.LoggingService.Instance.Info($"  - {game.Name}");
@@ -884,6 +919,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 
                 _settings.Save();
             });
+            
             // Start background scan as usual
             StartBackgroundAppRefresh();
             return;
@@ -1056,7 +1092,7 @@ public partial class MainWindowViewModel : ViewModelBase
         for (char driveLetter = 'A'; driveLetter <= 'Z'; driveLetter++)
         {
             string drivePath = $"{driveLetter}:\\";
-            
+
             try
             {
                 // Check if drive exists and is ready
@@ -2735,7 +2771,7 @@ public partial class MainWindowViewModel : ViewModelBase
                                 // Save this app's path in known applications
                                 _settings.KnownApplicationPaths.Add(newApp.ExecutablePath);
                             }
-                              // Apply sort only at the end
+                              // Apply sort to maintain order
                             ApplySort();
                             
                             // Save settings to persist the new apps

@@ -1362,6 +1362,7 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         // Skip very small files unless they're in a games directory
+        // Check if file is smaller than 50 KB
         if (fileInfo.Length < 50 * 1024 && !isInGamesDir) // 50 KB minimum unless in games directory
             return true;
 
@@ -2315,7 +2316,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     dir.Delete(true);
                 }
                 catch (Exception ex)
-                               {
+                {
                     Debug.WriteLine($"Error deleting directory {dir.Name}: {ex.Message}");
                 }
             }
@@ -2771,7 +2772,16 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         IsLoginPopupOpen = true;
     }
-      [RelayCommand]
+    
+    [RelayCommand]
+    private void ShowHome()
+    {
+        // Clear the selected app to show the empty screen
+        SelectedApp = null;
+        StatusMessage = "Home";
+    }
+      
+    [RelayCommand]
     private void CloseLoginPopup()
     {
         IsLoginPopupOpen = false;

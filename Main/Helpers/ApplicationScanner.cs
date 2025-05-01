@@ -30,9 +30,7 @@ namespace SaveVaultApp.Helpers
                 {
                     Avalonia.Threading.Dispatcher.UIThread.Post(() => installedApps.Add(app));
                 }
-            }
-
-            // First look for known games from KnownGames.json
+            }            // Initialize search paths
             var searchPaths = new List<string>();
             LoggingService.Instance.Info("Starting enhanced application discovery scan...");
             
@@ -233,80 +231,7 @@ namespace SaveVaultApp.Helpers
             
             LoggingService.Instance.Info($"Enhanced scan completed. Found {processedExecutables.Count} unique executables.");
         }
-        
-        /// <summary>
-        /// Checks for presence of known games from KnownGames.json by verifying their installation directories
-        /// </summary>
-        [SupportedOSPlatform("windows")]
-        private static void CheckKnownGamesFromConfig(ObservableCollection<ApplicationInfo> installedApps, Settings settings, HashSet<string> processedExecutables)
-        {
-            LoggingService.Instance.Info("Searching for known games from configuration...");
-            
-            // Get all available drive letters
-            var availableDrives = DriveInfo.GetDrives()
-                .Where(d => d.IsReady && d.DriveType != DriveType.Network && d.DriveType != DriveType.NoRootDirectory)
-                .Select(d => d.Name)
-                .ToList();
-            
-            // Get the known games from SaveLocationDetector
-            var knownGames = SaveLocationDetector.GetKnownGames();
-            int foundKnownGames = 0;
-            
-            if (knownGames.Count == 0)
-            {
-                LoggingService.Instance.Info("No known games found in configuration.");
-                return;
-            }
-            
-            LoggingService.Instance.Info($"Checking for {knownGames.Count} known games from configuration...");
-            
-            foreach (var game in knownGames)
-            {
-                if (string.IsNullOrEmpty(game.GameLocation) || string.IsNullOrEmpty(game.Executable))
-                    continue;
-                
-                foreach (var drive in availableDrives)
-                {
-                    string possibleGamePath = Path.Combine(drive, game.GameLocation.TrimStart('\\'));
-                    string possibleExePath = Path.Combine(possibleGamePath, game.Executable);
-                    
-                    // Check if the executable exists
-                    if (File.Exists(possibleExePath))
-                    {
-                        processedExecutables.Add(possibleExePath);
-                        
-                        // Create the ApplicationInfo and directly set the save path
-                        var app = new ApplicationInfo(settings)
-                        {
-                            Name = game.Name,
-                            Path = possibleGamePath,
-                            ExecutablePath = possibleExePath
-                        };
-                        
-                        // Set the save path from known game configuration
-                        if (game.SavePath != null && !string.IsNullOrEmpty(game.SavePath.Path))
-                        {
-                            string savePath = SaveLocationDetector.ExpandEnvironmentVariables(game.SavePath.Path);
-                            app.SavePath = Directory.Exists(savePath) ? savePath : "Unknown";
-                        }
-                        
-                        // Add to the collection if not already present
-                        if (!installedApps.Any(a => string.Equals(a.ExecutablePath, possibleExePath, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            installedApps.Add(app);
-                            foundKnownGames++;
-                            
-                            Debug.WriteLine($"Found known game: {game.Name} at {possibleExePath}");
-                            
-                            // Skip checking other drives once found
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            LoggingService.Instance.Info($"Found {foundKnownGames} known games from configuration.");
-        }
+          // KnownGamesFromConfig method removed - we will rebuild this functionality later
         
         private static void SearchDirectoryForExecutables(string directory, ObservableCollection<ApplicationInfo> apps, 
             HashSet<string> processedExecutables, Settings settings, int maxDepth = 6, int currentDepth = 0, Action<ApplicationInfo>? addAppCallback = null)

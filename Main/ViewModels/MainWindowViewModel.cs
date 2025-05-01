@@ -43,13 +43,26 @@ public partial class MainWindowViewModel : ViewModelBase
             _settings.HiddenGamesExpanded = value;
             _settings.Save();
         }
-    }
-
-    private ApplicationInfo? _selectedApp;
+    }    private ApplicationInfo? _selectedApp;
     public ApplicationInfo? SelectedApp
     {
         get => _selectedApp;
-        set => this.RaiseAndSetIfChanged(ref _selectedApp, value);
+        set 
+        {
+            // Check if we need to refresh the save path when changing selection
+            if (value != null && value != _selectedApp && 
+                (string.IsNullOrEmpty(value.SavePath) || value.SavePath == "Unknown"))
+            {
+                // Try to detect the save path if it's missing
+                string newPath = DetectSavePath(value);
+                if (!string.IsNullOrEmpty(newPath) && newPath != "Unknown")
+                {
+                    value.SavePath = newPath;
+                }
+            }
+            
+            this.RaiseAndSetIfChanged(ref _selectedApp, value);
+        }
     }
 
     private bool _isLoading;
@@ -453,34 +466,18 @@ public partial class MainWindowViewModel : ViewModelBase
         DirectoryInfo[] dirs = dir.GetDirectories();
         foreach (DirectoryInfo subdir in dirs)
         {
-            string newDestDir = Path.Combine(destDir, subdir.Name);
-            Directory.CreateDirectory(newDestDir);
-            CopyDirectory(subdir.FullName, newDestDir, ref filesCopied);
+            string newDestinationDir = Path.Combine(destDir, subdir.Name);
+            CopyDirectory(subdir.FullName, newDestinationDir, ref filesCopied);
         }
         
         // Copy all files
         FileInfo[] files = dir.GetFiles();
         foreach (FileInfo file in files)
         {
-            try
-            {
-                // Skip temp files, lock files, and very large files
-                if (file.Extension.Contains("tmp") || 
-                    file.Extension.Contains("lock") || 
-                    file.Length > 500 * 1024 * 1024) // Skip files larger than 500MB
-                {
-                    continue;
-                }
-                
-                string destFile = Path.Combine(destDir, file.Name);
-                file.CopyTo(destFile, false);
-                filesCopied++;
-            }
-            catch (Exception ex)
-            {
-                // Log but continue with other files
-                Debug.WriteLine($"Failed to copy file {file.FullName}: {ex.Message}");
-            }
+            string tempPath = Path.Combine(destDir, file.Name);
+            Directory.CreateDirectory(destDir); // Ensure destination directory exists
+            file.CopyTo(tempPath, true);
+            filesCopied++;
         }
     }
     
@@ -840,11 +837,9 @@ public partial class MainWindowViewModel : ViewModelBase
                                         _settings.KnownApplicationPaths.Add(app.ExecutablePath);
 
                                     ApplySort();
-
                                     // Update status message with progress
                                     int total = AllInstalledApps.Count;
-                                    int known = AllInstalledApps.Count(a => Utilities.SaveLocationDetector.IsKnownGame(a.ExecutablePath));
-                                    StatusMessage = $"Found {total} programs so far ({known} known games)...";
+                                    StatusMessage = $"Found {total} programs so far...";
                                 });
                             }
                         }
@@ -882,52 +877,42 @@ public partial class MainWindowViewModel : ViewModelBase
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 IsLoading = false;
-                
-                // Count final stats
+                  // Count final stats
                 int totalPrograms = AllInstalledApps.Count;
-                int knownGames = AllInstalledApps.Count(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath));
                 int withSaveLocations = AllInstalledApps.Count(app => !string.IsNullOrEmpty(app.SavePath) && app.SavePath != "Unknown");
                 
                 // Update status message with final stats
-                string statusMessage = $"Found {totalPrograms} programs, {knownGames} known games, {withSaveLocations} with save location";
+                string statusMessage = $"Found {totalPrograms} programs, {withSaveLocations} with save location";
                 StatusMessage = statusMessage;
                 Debug.WriteLine(statusMessage);
-                
-                // Log to the log viewer
-                int noSaveLocations = knownGames - withSaveLocations;
-                string logMessage = $"Application scan completed: {totalPrograms} programs, {knownGames} known games, {noSaveLocations} games with no save location";
+                  // Log to the log viewer
+                string logMessage = $"Application scan completed: {totalPrograms} programs, {withSaveLocations} with save location";
                 Services.LoggingService.Instance.Info(logMessage);
 
                 // Log games with no save location if needed
-                if (noSaveLocations > 0)
+                var gamesWithNoSaveLocation = AllInstalledApps
+                    .Where(app => (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown"))
+                    .ToList();
+                
+                if (gamesWithNoSaveLocation.Any())
                 {
-                    var gamesWithNoSaveLocation = AllInstalledApps
-                        .Where(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath) &&
-                               (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown"))
-                        .ToList();
-                    
-                    if (gamesWithNoSaveLocation.Any())
-                    {
-                        string noSaveLocationList = string.Join(", ", gamesWithNoSaveLocation
-                            .Select(app => app.Name)
-                            .OrderBy(name => name));
-                        
-                        if (noSaveLocationList.Length > 500)
+                    string noSaveLocationList = string.Join(", ", gamesWithNoSaveLocation
+                        .Select(app => app.Name)
+                        .OrderBy(name => name));
+                
+                    if (noSaveLocationList.Length > 500)
+                    {                            
+                        Services.LoggingService.Instance.Info($"Apps with no save location detected:");
+                        foreach (var game in gamesWithNoSaveLocation.OrderBy(app => app.Name))
                         {
-                            Services.LoggingService.Instance.Info($"Known games with no save location detected:");
-                            foreach (var game in gamesWithNoSaveLocation.OrderBy(app => app.Name))
-                            {
-                                Services.LoggingService.Instance.Info($"  - {game.Name}");
-                            }
-                        }
-                        else
-                        {
-                            Services.LoggingService.Instance.Info($"Known games with no save location detected: {noSaveLocationList}");
+                            Services.LoggingService.Instance.Info($"  - {game.Name}");
                         }
                     }
+                    else
+                    {
+                        Services.LoggingService.Instance.Info($"Apps with no save location detected: {noSaveLocationList}");
+                    }
                 }
-                
-                _settings.Save();
             });
             
             // Start background scan as usual
@@ -993,52 +978,45 @@ public partial class MainWindowViewModel : ViewModelBase
                     InstalledApps.Add(app);
             }            ApplySort();
             IsLoading = false;
-            
-            // Count programs with detected save locations and known games
+              // Count programs with detected save locations
             int totalPrograms = AllInstalledApps.Count;
-            int knownGames = AllInstalledApps.Count(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath));
             int withSaveLocations = AllInstalledApps.Count(app => !string.IsNullOrEmpty(app.SavePath) && app.SavePath != "Unknown");
             
             // Update status message with detailed stats
-            string statusMessage = $"Found {totalPrograms} programs, {knownGames} known games, {withSaveLocations} with save location";
+            string statusMessage = $"Found {totalPrograms} programs, {withSaveLocations} with save location";
             StatusMessage = statusMessage;
             Debug.WriteLine(statusMessage);
             
-            // Log to the log viewer with additional details about games with no save location
-            int noSaveLocations = knownGames - withSaveLocations;
-            string logMessage = $"Application scan completed: {totalPrograms} programs, {knownGames} known games, {noSaveLocations} games with no save location";
+            // Log to the log viewer with additional details about apps with no save location
+            string logMessage = $"Application scan completed: {totalPrograms} programs, {withSaveLocations} with save location";
             Services.LoggingService.Instance.Info(logMessage);
             
-            // If there are known games with no save location, log them specifically
-            if (noSaveLocations > 0)
+            // Log apps with no save location if needed
+            var appsWithNoSaveLocation = AllInstalledApps
+                .Where(app => (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown"))
+                .ToList();
+            
+            if (appsWithNoSaveLocation.Any())
             {
-                var gamesWithNoSaveLocation = AllInstalledApps
-                    .Where(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath) &&
-                           (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown"))
-                    .ToList();
+                // Get the list of apps with no save location, sorted alphabetically
+                string noSaveLocationList = string.Join(", ", appsWithNoSaveLocation
+                    .Select(app => app.Name)
+                    .OrderBy(name => name));
                 
-                if (gamesWithNoSaveLocation.Any())
+                // Split into multiple log messages if the list is too long
+                if (noSaveLocationList.Length > 500)
                 {
-                    // Get the list of games with no save location, sorted alphabetically
-                    string noSaveLocationList = string.Join(", ", gamesWithNoSaveLocation
-                        .Select(app => app.Name)
-                        .OrderBy(name => name));
-                        
-                    // Split into multiple log messages if the list is too long
-                    if (noSaveLocationList.Length > 500)
+                    Services.LoggingService.Instance.Info($"Apps with no save location detected:");
+                    
+                    // Log apps in groups to avoid very long lines
+                    foreach (var app in appsWithNoSaveLocation.OrderBy(app => app.Name))
                     {
-                        Services.LoggingService.Instance.Info($"Known games with no save location detected:");
-                        
-                        // Log games in groups to avoid very long lines
-                        foreach (var game in gamesWithNoSaveLocation.OrderBy(app => app.Name))
-                        {
-                            Services.LoggingService.Instance.Info($"  - {game.Name}");
-                        }
+                        Services.LoggingService.Instance.Info($"  - {app.Name}");
                     }
-                    else
-                    {
-                        Services.LoggingService.Instance.Info($"Known games with no save location detected: {noSaveLocationList}");
-                    }
+                }
+                else
+                {
+                    Services.LoggingService.Instance.Info($"Apps with no save location detected: {noSaveLocationList}");
                 }
             }
             
@@ -1047,7 +1025,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
         // 2. Start background scan to validate and update the list
         StartBackgroundAppRefresh();
-    }    [SupportedOSPlatform("windows")]
+    }
+    
+    [SupportedOSPlatform("windows")]
     private void SearchForExecutables(ObservableCollection<ApplicationInfo> installedApps)
     {
         var searchPaths = new List<string>();
@@ -1580,14 +1560,6 @@ public partial class MainWindowViewModel : ViewModelBase
                     Debug.WriteLine($"Skipping duplicate executable: {exePath} (already have {exeName})");
                     continue;
                 }
-                
-                // Also skip if it's known game to avoid duplicates
-                if (Utilities.SaveLocationDetector.IsKnownGame(exePath))
-                {
-                    Debug.WriteLine($"Skipping {exePath} as it's already identified as a known game");
-                    continue;
-                }
-                
                 // Add to our tracking maps
                 executableNameMap[exeName] = exePath;
                 
@@ -1740,7 +1712,6 @@ public partial class MainWindowViewModel : ViewModelBase
         // Use the new SaveLocationDetector utility class to detect save paths
         var result = Utilities.SaveLocationDetector.DetectSavePath(app);
         
-        // Update the app name if one was provided from KnownGames.json
         if (!string.IsNullOrEmpty(result.GameName))
         {
             // Only update if not already customized by the user
@@ -1773,22 +1744,7 @@ public partial class MainWindowViewModel : ViewModelBase
         InstalledApps.Clear();
         HiddenGames.Clear();
         RunningApps.Clear();
-        
-        // Log that the cache was reset
-        Debug.WriteLine("Cache reset initiated. All application data cleared.");
-          // Force the SaveLocationDetector to reload KnownGames.json
-        try
-        {
-            Utilities.SaveLocationDetector.ReloadKnownGames();
-            int knownGamesCount = Utilities.SaveLocationDetector.GetKnownGamesCount();
-            Debug.WriteLine($"Known games definitions reloaded. {knownGamesCount} game definitions available.");
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Error reloading known games: {ex.Message}");
-        }
-        
-        // Run the scan again from scratch
+
         Task.Run(async () =>
         {
             await LoadInstalledAppsAsync();
@@ -2359,7 +2315,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     dir.Delete(true);
                 }
                 catch (Exception ex)
-                {
+                               {
                     Debug.WriteLine($"Error deleting directory {dir.Name}: {ex.Message}");
                 }
             }
@@ -2789,11 +2745,10 @@ public partial class MainWindowViewModel : ViewModelBase
                             
                             // Calculate statistics after new apps are added
                             int totalPrograms = AllInstalledApps.Count;
-                            int knownGames = AllInstalledApps.Count(app => Utilities.SaveLocationDetector.IsKnownGame(app.ExecutablePath));
                             int withSaveLocations = AllInstalledApps.Count(app => !string.IsNullOrEmpty(app.SavePath) && app.SavePath != "Unknown");
                             
                             // Update status with newly found apps and overall statistics
-                            string statusMessage = $"Found {actuallyNewApps.Count} new applications. Total: {totalPrograms} programs, {knownGames} known games, {withSaveLocations} with save location";
+                            string statusMessage = $"Found {actuallyNewApps.Count} new applications. Total: {totalPrograms} programs, {withSaveLocations} with save location";
                             StatusMessage = statusMessage;
                             Debug.WriteLine(statusMessage);
                         });

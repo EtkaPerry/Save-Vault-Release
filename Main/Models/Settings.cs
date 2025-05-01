@@ -19,7 +19,9 @@ public class Settings
 {
     // Add static instance
     private static Settings? _instance;
-    public static Settings? Instance => _instance;    private static readonly string SettingsPath = Path.Combine(
+    public static Settings? Instance => _instance;    
+    
+    private static readonly string SettingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "SaveVault",
         "settings.json"
@@ -72,6 +74,14 @@ public class Settings
 
     // Add backup history storage
     public Dictionary<string, List<SaveBackupInfo>> BackupHistory { get; set; } = new();
+    
+    // Constructor that ensures this instance is the current static instance
+    public Settings()
+    {
+        // Set this instance as the current static instance
+        // This ensures that any instance creation updates the static reference
+        _instance = this;
+    }
 
     public static Settings Load()
     {
@@ -111,12 +121,16 @@ public class Settings
         var newSettings = new Settings();
         _instance = newSettings;
         return newSettings;
-    }
-
-    public void Save()
+    }    public void Save()
     {
         try
         {
+            // Make sure this instance is set as the static instance
+            if (_instance != this)
+            {
+                _instance = this;
+            }
+            
             var directory = Path.GetDirectoryName(SettingsPath);
             if (!Directory.Exists(directory) && directory != null)
             {
@@ -126,6 +140,8 @@ public class Settings
             var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(this, options);
             File.WriteAllText(SettingsPath, json);
+            
+            Debug.WriteLine($"Settings saved successfully to {SettingsPath}");
         }
         catch (Exception ex)
         {
@@ -200,15 +216,23 @@ public class AppSpecificSettings
             _maxStartSaves = value;
             SaveSettings();
         }
-    }
-
-    private void SaveSettings()
+    }    private void SaveSettings()
     {
         // Get the instance of Settings class if available
         var settings = SaveVaultApp.Models.Settings.Instance;
         if (settings != null)
         {
+            // Ensure the app settings get saved
             settings.Save();
+        }
+        else
+        {
+            // If no instance, try to load or create a new one and save
+            settings = Settings.Load();
+            if (settings != null)
+            {
+                settings.Save();
+            }
         }
     }
 }

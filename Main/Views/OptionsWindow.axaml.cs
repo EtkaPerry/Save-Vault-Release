@@ -325,10 +325,9 @@ public partial class OptionsWindow : Window
             {
                 // Reset all settings and close the app to restart fresh
                 if (_mainViewModel.Settings != null)
-                {
-                    try
-                    {
-                        // Create a completely new settings object with default values
+                {                    try
+                    {                        // Create a completely new settings object with default values
+                        // This will automatically update the static instance
                         var freshSettings = new SaveVaultApp.Models.Settings();
                         
                         // Save the fresh settings to override the existing file

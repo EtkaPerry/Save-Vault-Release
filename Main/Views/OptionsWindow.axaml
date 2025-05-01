@@ -63,30 +63,33 @@
                     <!-- General Panel -->
                     <StackPanel Name="GeneralPanel">
                         <TextBlock Text="General Settings" FontSize="18" FontWeight="Bold" Margin="0,0,0,15"/>
-                        
-                        <!-- Auto-save Interval -->
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                          <!-- Auto-save Interval -->                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                             <TextBlock Text="Auto-save every:" 
                                      VerticalAlignment="Center" 
-                                     Width="120"/>
-                            <NumericUpDown Value="{Binding AutoSaveInterval}"
+                                     Width="120"/>                            <NumericUpDown Value="{Binding AutoSaveInterval, Mode=TwoWay}"
                                          Minimum="1"
                                          Maximum="60"
-                                         Width="100"/>
+                                         Width="120"
+                                         HorizontalContentAlignment="Center"
+                                         FormatString="0"
+                                         ShowButtonSpinner="True"
+                                         ClipValueToMinMax="True"/>
                             <TextBlock Text="minutes" 
                                      VerticalAlignment="Center" 
                                      Margin="10,0,0,0"/>
                         </StackPanel>
 
-                        <!-- Max Auto-saves -->
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <!-- Max Auto-saves -->                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                             <TextBlock Text="Max auto-saves:" 
                                      VerticalAlignment="Center" 
-                                     Width="120"/>
-                            <NumericUpDown Value="{Binding MaxAutoSaves}"
+                                     Width="120"/>                            <NumericUpDown Value="{Binding MaxAutoSaves, Mode=TwoWay}"
                                          Minimum="1"
                                          Maximum="50"
-                                         Width="100"/>
+                                         Width="120"
+                                         HorizontalContentAlignment="Center"
+                                         FormatString="0"
+                                         ShowButtonSpinner="True"
+                                         ClipValueToMinMax="True"/>
                             <TextBlock Text="backups" 
                                      VerticalAlignment="Center" 
                                      Margin="10,0,0,0"/>
@@ -96,11 +99,14 @@
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                             <TextBlock Text="Max start-saves:" 
                                      VerticalAlignment="Center" 
-                                     Width="120"/>
-                            <NumericUpDown Value="{Binding MaxStartSaves}"
+                                     Width="120"/>                            <NumericUpDown Value="{Binding MaxStartSaves, Mode=TwoWay}"
                                          Minimum="1"
                                          Maximum="20"
-                                         Width="100"/>
+                                         Width="120"
+                                         HorizontalContentAlignment="Center"
+                                         FormatString="0"
+                                         ShowButtonSpinner="True"
+                                         ClipValueToMinMax="True"/>
                             <TextBlock Text="backups" 
                                      VerticalAlignment="Center" 
                                      Margin="10,0,0,0"/>

@@ -11,6 +11,7 @@ using Avalonia.Platform.Storage;
 using Avalonia;
 using System.Linq;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 
 namespace SaveVaultApp.ViewModels;
 
@@ -164,31 +165,37 @@ public partial class OptionsViewModel : ViewModelBase
     {
         get => _isCalculatingStorage;
         set => this.RaiseAndSetIfChanged(ref _isCalculatingStorage, value);
-    }
-
-    public OptionsViewModel(Settings settings, Action onSettingsChanged)
+    }    public OptionsViewModel(Settings settings, Action onSettingsChanged)
     {
-        _settings = settings;
+        // Ensure we're using the static instance when available
+        _settings = Settings.Instance ?? settings;
         _onSettingsChanged = onSettingsChanged;
 
+        // Log what settings we're using
+        Debug.WriteLine($"OptionsViewModel initialized with settings. AutoSaveInterval={_settings.AutoSaveInterval}, GlobalAutoSaveEnabled={_settings.GlobalAutoSaveEnabled}");
+
         // Load current settings
-        _autoSaveInterval = settings.AutoSaveInterval;
-        _globalAutoSaveEnabled = settings.GlobalAutoSaveEnabled;
-        _startSaveEnabled = settings.StartSaveEnabled;
-        _maxAutoSaves = settings.MaxAutoSaves;
-        _maxStartSaves = settings.MaxStartSaves;
-        _selectedTheme = settings.Theme ?? "System"; // Default to System if not set
-        _backupStorageLocation = settings.BackupStorageLocation;
+        _autoSaveInterval = _settings.AutoSaveInterval;
+        _globalAutoSaveEnabled = _settings.GlobalAutoSaveEnabled;
+        _startSaveEnabled = _settings.StartSaveEnabled;
+        _maxAutoSaves = _settings.MaxAutoSaves;
+        _maxStartSaves = _settings.MaxStartSaves;
+        _selectedTheme = _settings.Theme ?? "System"; // Default to System if not set
+        _backupStorageLocation = _settings.BackupStorageLocation;
         
         // Apply the current theme on startup
         ApplyTheme(_selectedTheme);
-    }
-
-    // Helper method to save settings and notify about changes
+    }// Helper method to save settings and notify about changes
     private void SaveChanges()
     {
+        // Save settings to disk
         _settings.Save();
+        
+        // Call the callback to update the main view model
         _onSettingsChanged?.Invoke();
+        
+        // Debug logging
+        Debug.WriteLine($"Settings saved: Theme={_settings.Theme}, AutoSaveInterval={_settings.AutoSaveInterval}, GlobalAutoSaveEnabled={_settings.GlobalAutoSaveEnabled}");
     }
     
     private void ApplyTheme(string themeName)

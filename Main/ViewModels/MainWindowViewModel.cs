@@ -126,12 +126,22 @@ public partial class MainWindowViewModel : ViewModelBase
 
     // Changed to internal to allow access from App.axaml.cs
     internal Window? _mainWindow; 
-    public bool IsExiting { get; set; }
-
-    // Constructor to initialize the application
+    public bool IsExiting { get; set; }    // Constructor to initialize the application
     public MainWindowViewModel()
     {
+        // Load settings and make sure static instance is updated
         _settings = Settings.Load();
+        
+        // If for some reason the static instance is not set, set it now
+        if (Settings.Instance == null)
+        {
+            // This will update the static instance
+            new Settings();
+            
+            // Now reload the settings from file
+            _settings = Settings.Load();
+        }
+        
         _selectedSortOption = _settings.SortOption;
         _isHiddenGamesExpanded = _settings.HiddenGamesExpanded;
         

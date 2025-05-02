@@ -2,6 +2,7 @@ using System;
 using ReactiveUI;
 using CommunityToolkit.Mvvm.Input;
 using SaveVaultApp.Models;
+using SaveVaultApp.Services;
 using Avalonia.Styling;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -172,9 +173,7 @@ public partial class OptionsViewModel : ViewModelBase
         _onSettingsChanged = onSettingsChanged;
 
         // Log what settings we're using
-        Debug.WriteLine($"OptionsViewModel initialized with settings. AutoSaveInterval={_settings.AutoSaveInterval}, GlobalAutoSaveEnabled={_settings.GlobalAutoSaveEnabled}");
-
-        // Load current settings
+        Debug.WriteLine($"OptionsViewModel initialized with settings. AutoSaveInterval={_settings.AutoSaveInterval}, GlobalAutoSaveEnabled={_settings.GlobalAutoSaveEnabled}");        // Load current settings
         _autoSaveInterval = _settings.AutoSaveInterval;
         _globalAutoSaveEnabled = _settings.GlobalAutoSaveEnabled;
         _startSaveEnabled = _settings.StartSaveEnabled;
@@ -182,6 +181,26 @@ public partial class OptionsViewModel : ViewModelBase
         _maxStartSaves = _settings.MaxStartSaves;
         _selectedTheme = _settings.Theme ?? "System"; // Default to System if not set
         _backupStorageLocation = _settings.BackupStorageLocation;
+        
+        // Load update settings
+        _autoCheckUpdates = _settings.AutoCheckUpdates;
+        _updateCheckInterval = _settings.UpdateCheckInterval;
+        
+        // Set up update service events
+        var updateService = UpdateService.Instance;
+        updateService.UpdateStatusChanged += (s, status) => {
+            UpdateStatus = status;
+        };
+        updateService.UpdateAvailabilityChanged += (s, available) => {
+            UpdateAvailable = available;
+        };
+        updateService.DownloadProgressChanged += (s, progress) => {
+            // Update progress is handled elsewhere
+        };
+        
+        // Update status from service
+        UpdateAvailable = updateService.UpdateAvailable;
+        UpdateStatus = updateService.StatusMessage;
         
         // Apply the current theme on startup
         ApplyTheme(_selectedTheme);
@@ -332,5 +351,70 @@ public partial class OptionsViewModel : ViewModelBase
             Console.WriteLine($"Error calculating size for {folderPath}: {ex.Message}");
             return 0;
         }
+    }
+    
+    // Update-related properties
+    private bool _autoCheckUpdates;
+    public bool AutoCheckUpdates
+    {
+        get => _autoCheckUpdates;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _autoCheckUpdates, value);
+            _settings.AutoCheckUpdates = value;
+            SaveChanges();
+        }
+    }
+
+    private int _updateCheckInterval;
+    public int UpdateCheckInterval
+    {
+        get => _updateCheckInterval;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _updateCheckInterval, value);
+            _settings.UpdateCheckInterval = value;
+            SaveChanges();
+        }
+    }
+    
+    private bool _updateAvailable;
+    public bool UpdateAvailable
+    {
+        get => _updateAvailable;
+        set => this.RaiseAndSetIfChanged(ref _updateAvailable, value);
+    }
+    
+    private bool _isDownloadingUpdate;
+    public bool IsDownloadingUpdate
+    {
+        get => _isDownloadingUpdate;
+        set => this.RaiseAndSetIfChanged(ref _isDownloadingUpdate, value);
+    }
+
+    private string _updateStatus = "No updates checked";
+    public string UpdateStatus
+    {
+        get => _updateStatus;
+        set => this.RaiseAndSetIfChanged(ref _updateStatus, value);
+    }
+    
+    public string LastUpdateCheck => _settings.LastUpdateCheck == DateTime.MinValue ? 
+        "Never" : _settings.LastUpdateCheck.ToString("g");
+
+    // Update commands
+    [RelayCommand]
+    private async Task CheckForUpdates()
+    {
+        await UpdateService.Instance.CheckForUpdates();
+        this.RaisePropertyChanged(nameof(LastUpdateCheck));
+    }
+    
+    [RelayCommand]
+    private async Task InstallUpdate()
+    {
+        IsDownloadingUpdate = true;
+        await UpdateService.Instance.DownloadAndInstallUpdate();
+        IsDownloadingUpdate = false;
     }
 }

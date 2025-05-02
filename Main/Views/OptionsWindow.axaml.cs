@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using SaveVaultApp.ViewModels;
 using SaveVaultApp.Models;
+using SaveVaultApp.Utilities;
 using System.IO;
 using System;
 using System.Threading.Tasks;
@@ -17,6 +18,7 @@ public partial class OptionsWindow : Window
     private Panel? _generalPanel;
     private Panel? _appearancePanel;
     private Panel? _storagePanel;
+    private Panel? _updatesPanel;
     private Panel? _creditPanel;
     
     // Reference to the main view model for app refresh
@@ -91,11 +93,11 @@ public partial class OptionsWindow : Window
         {
             closeButton.Click += CloseButton_Click;
         }
-        
-        // Get panel references
+          // Get panel references
         _generalPanel = this.FindControl<Panel>("GeneralPanel");
         _appearancePanel = this.FindControl<Panel>("AppearancePanel");
         _storagePanel = this.FindControl<Panel>("StoragePanel");
+        _updatesPanel = this.FindControl<Panel>("UpdatesPanel");
         _creditPanel = this.FindControl<Panel>("CreditPanel");
         
         // Set up options list selection handling
@@ -144,11 +146,11 @@ public partial class OptionsWindow : Window
         if (sender is ListBox listBox)
         {
             if (listBox.SelectedItem is ListBoxItem item)
-            {
-                // Hide all panels first
+            {                // Hide all panels first
                 if (_generalPanel != null) _generalPanel.IsVisible = false;
                 if (_appearancePanel != null) _appearancePanel.IsVisible = false;
                 if (_storagePanel != null) _storagePanel.IsVisible = false;
+                if (_updatesPanel != null) _updatesPanel.IsVisible = false;
                 if (_creditPanel != null) _creditPanel.IsVisible = false;
                 
                 // Show the selected panel
@@ -159,15 +161,27 @@ public partial class OptionsWindow : Window
                         break;
                     case "Appearance":
                         if (_appearancePanel != null) _appearancePanel.IsVisible = true;
-                        break;
-                    case "Storage":
+                        break;                    case "Storage":
                         if (_storagePanel != null) 
                         {
                             _storagePanel.IsVisible = true;
                             // Automatically calculate storage usage when panel is selected
-                            if (DataContext is OptionsViewModel optionsViewModel)
+                            if (DataContext is OptionsViewModel viewModel)
                             {
-                                _ = optionsViewModel.CalculateStorageUsageCommand.ExecuteAsync(null);
+                                _ = viewModel.CalculateStorageUsageCommand.ExecuteAsync(null);
+                            }
+                        }
+                        break;
+                    case "Updates":
+                        if (_updatesPanel != null) 
+                        {
+                            _updatesPanel.IsVisible = true;
+                            // Refresh the update status when panel is selected
+                            if (DataContext is OptionsViewModel viewModel)
+                            {
+                                ((ReactiveUI.IReactiveObject)viewModel).RaisePropertyChanged(
+                                    new System.ComponentModel.PropertyChangedEventArgs(nameof(OptionsViewModel.LastUpdateCheck))
+                                );
                             }
                         }
                         break;

@@ -12,6 +12,7 @@ using ReactiveUI;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SaveVaultApp.Models;
+using SaveVaultApp.Services;
 using System.Windows.Input;
 using Avalonia.Controls;
 using Avalonia;
@@ -157,6 +158,22 @@ public partial class MainWindowViewModel : ViewModelBase
         
         _selectedSortOption = _settings.SortOption;
         _isHiddenGamesExpanded = _settings.HiddenGamesExpanded;
+        
+        // Initialize update service
+        var updateService = UpdateService.Instance;
+        updateService.UpdateStatusChanged += (s, status) => {
+            UpdateStatus = status;
+        };
+        updateService.UpdateAvailabilityChanged += (s, available) => {
+            UpdateAvailable = available;
+            if (available && updateService.LatestVersion != null) {
+                UpdateVersion = updateService.LatestVersion.Version;
+                IsUpdateNotificationVisible = true;
+            }
+        };
+        updateService.DownloadProgressChanged += (s, progress) => {
+            DownloadProgress = progress;
+        };
         
         // Initialize backup root folder
         _backupRootFolder = Path.Combine(
@@ -2311,6 +2328,7 @@ public partial class MainWindowViewModel : ViewModelBase
             // Delete all subdirectories
             foreach (DirectoryInfo dir in saveDirInfo.GetDirectories())
             {
+               
                 try
                 {
                     dir.Delete(true);
@@ -3251,8 +3269,85 @@ public partial class MainWindowViewModel : ViewModelBase
             logViewerWindow.Show();
         }
     }
-} 
-
+    
+    // Update properties
+    private bool _updateAvailable;
+    public bool UpdateAvailable
+    {
+        get => _updateAvailable;
+        set => this.RaiseAndSetIfChanged(ref _updateAvailable, value);
+    }
+    
+    private string _updateStatus = "No updates checked";
+    public string UpdateStatus
+    {
+        get => _updateStatus;
+        set => this.RaiseAndSetIfChanged(ref _updateStatus, value);
+    }
+    
+    private double _downloadProgress;
+    public double DownloadProgress
+    {
+        get => _downloadProgress;
+        set => this.RaiseAndSetIfChanged(ref _downloadProgress, value);
+    }
+    
+    private bool _isDownloadingUpdate;
+    public bool IsDownloadingUpdate
+    {
+        get => _isDownloadingUpdate;
+        set => this.RaiseAndSetIfChanged(ref _isDownloadingUpdate, value);
+    }
+    
+    private bool _isUpdateNotificationVisible;
+    public bool IsUpdateNotificationVisible
+    {
+        get => _isUpdateNotificationVisible;
+        set => this.RaiseAndSetIfChanged(ref _isUpdateNotificationVisible, value);
+    }
+    
+    private string _updateVersion = string.Empty;
+    public string UpdateVersion
+    {
+        get => _updateVersion;
+        set => this.RaiseAndSetIfChanged(ref _updateVersion, value);
+    }
+    
+    // Update commands
+    [RelayCommand]
+    private async Task CheckForUpdates()
+    {
+        await UpdateService.Instance.CheckForUpdates();
+    }
+    
+    [RelayCommand]
+    private async Task InstallUpdate()
+    {
+        IsDownloadingUpdate = true;
+        await UpdateService.Instance.DownloadAndInstallUpdate();
+        IsDownloadingUpdate = false;
+    }
+    
+    [RelayCommand]
+    private void DismissUpdateNotification()
+    {
+        IsUpdateNotificationVisible = false;
+    }
+    
+    // Add this to initialize update checking when the app starts
+    public async Task InitializeUpdateCheck()
+    {
+        // Check for updates if needed based on settings
+        await UpdateService.Instance.CheckForUpdatesIfNeeded();
+    }
+    
+    [RelayCommand]
+    private void OnNextSaveHover()
+    {
+        IsHoveringNextSave = true;
+    }
+}
+ 
 public class ApplicationInfo : ReactiveObject
 {
     // Add reference to settings

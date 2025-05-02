@@ -3,7 +3,9 @@ RewriteEngine On
 # Prevent direct access to sensitive files and directories
 RewriteRule ^site/includes/ - [F,L]
 RewriteRule ^\.git/ - [F,L]
-RewriteRule ^.*\.(?:git|env|log|json|lock|md)$ - [F,L]
+# Block sensitive file types except in the download directory
+RewriteCond %{REQUEST_URI} !^/download/
+RewriteRule ^.*\.(?:git|env|log|lock|md)$ - [F,L]
 
 # Custom 404 error page
 
@@ -12,10 +14,14 @@ RewriteRule ^api/(.*)$ auth_api.php [L,QSA]
 
 # Handle clean URLs for pages
 
-# Allow direct access to assets and .well-known
+# Allow direct access to assets, download directory and .well-known
+RewriteRule ^site/download/ - [L]
 RewriteRule ^\.well-known/ - [L]
+RewriteRule ^(?!download/).*\.json$ - [F,L]
 
 # Handle assets with clean URLs
+
+# Handle downloads with clean URLs
 
 # Default page handler
 RewriteCond %{REQUEST_FILENAME} !-f

@@ -43,11 +43,15 @@ public class Settings
     public bool StartSaveEnabled { get; set; } = true;
     public int MaxAutoSaves { get; set; } = 5; // Maximum number of auto-saves to keep
     public int MaxStartSaves { get; set; } = 3; // Maximum number of start saves to keep
-    
-    // Backup storage location
+      // Backup storage location
     public string BackupStorageLocation { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "SaveVault", "Backups");
+        
+    // Update settings
+    public bool AutoCheckUpdates { get; set; } = true;
+    public DateTime LastUpdateCheck { get; set; } = DateTime.MinValue;
+    public int UpdateCheckInterval { get; set; } = 24; // hours
     
     // Window settings
     public double WindowWidth { get; set; } = 800;

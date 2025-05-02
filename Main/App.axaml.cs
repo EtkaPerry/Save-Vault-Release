@@ -48,8 +48,7 @@ public partial class App : Application
                     _ => ThemeVariant.Default // System theme
                 };
             }
-            
-            // Create the ViewModel and MainWindow
+              // Create the ViewModel and MainWindow
             var viewModel = new MainWindowViewModel();
             var mainWindow = new MainWindow
             {
@@ -58,6 +57,9 @@ public partial class App : Application
             
             // Store the window reference for later showing/hiding
             viewModel._mainWindow = mainWindow;
+            
+            // Check for updates if enabled
+            _ = viewModel.InitializeUpdateCheck();
             
             // Set the MainWindow
             desktop.MainWindow = mainWindow;

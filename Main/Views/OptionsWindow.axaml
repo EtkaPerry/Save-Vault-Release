@@ -3,6 +3,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="using:SaveVaultApp.ViewModels"
+        xmlns:conv="using:SaveVaultApp.Utilities"
         mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="400"
         x:Class="SaveVaultApp.Views.OptionsWindow"
         x:DataType="vm:OptionsViewModel"        Title="Options"
@@ -13,13 +14,15 @@
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaChromeHints="NoChrome"
         ExtendClientAreaTitleBarHeightHint="-1"
-        Background="{DynamicResource PanelBackground}">
-
-    <Window.Styles>
+        Background="{DynamicResource PanelBackground}">    <Window.Styles>
         <Style Selector="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource TextColor}" />
         </Style>
     </Window.Styles>
+    
+    <Window.Resources>
+        <conv:DateTimeToTimeAgoConverter x:Key="TimeAgoConverter"/>
+    </Window.Resources>
 
     <DockPanel>
         <!-- Custom Title Bar -->
@@ -309,52 +312,112 @@
                                      Width="150"/>
                                      
                             <NumericUpDown Value="{Binding UpdateCheckInterval, Mode=TwoWay}"
+                                         HorizontalContentAlignment="Center"
                                          Minimum="1"
                                          Maximum="168"
-                                         Width="90"/>
+                                         Width="120"/>
                                          
                             <TextBlock Text="hours" 
                                      VerticalAlignment="Center" 
                                      Margin="10,0,0,0"/>
                         </StackPanel>
-                        
-                        <!-- Manual Update Check -->
-                        <TextBlock Text="Check manually:" Margin="0,10,0,10"/>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            
-                            <Button Grid.Column="0" 
-                                  Content="Check for Updates Now" 
-                                  Command="{Binding CheckForUpdatesCommand}"
-                                  Background="#4CAF50"
-                                  Foreground="White"
-                                  Padding="10,5"/>
-                                  
-                            <TextBlock Grid.Column="1"
-                                     Text="{Binding UpdateStatus}"
-                                     VerticalAlignment="Center"
-                                     Margin="20,0,0,0"/>
-                                     
-                            <Button Grid.Column="2"
-                                  Content="Install Update"
-                                  Command="{Binding InstallUpdateCommand}"
-                                  IsVisible="{Binding UpdateAvailable}"
-                                  IsEnabled="{Binding !IsDownloadingUpdate}"
-                                  Padding="10,5"
-                                  Margin="10,0,0,0"/>
-                        </Grid>
-                        
-                        <!-- Last check time -->
-                        <TextBlock Text="{Binding LastUpdateCheck, StringFormat='Last checked: {0}'}"
-                                 Margin="0,15,0,0"
-                                 Opacity="0.7"/>
-                                 
-                        <TextBlock Text="Current version: 1.0.0"
-                                 Margin="0,10,0,0"/>
+                          <!-- Update Status Panel -->
+                        <Border Background="{DynamicResource ListItemBackground}" 
+                                CornerRadius="8" 
+                                Padding="20" 
+                                Margin="0,10,0,20">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- Version Info -->
+                                <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="20">
+                                    <StackPanel>
+                                        <TextBlock Text="Current Version"
+                                                 Opacity="0.7"
+                                                 FontSize="12"/>
+                                        <TextBlock Text="{Binding CurrentVersion}"
+                                                 FontSize="16"
+                                                 FontWeight="SemiBold"/>
+                                    </StackPanel>
+
+                                    <StackPanel>
+                                        <TextBlock Text="Latest Version"
+                                                 Opacity="0.7"
+                                                 FontSize="12"/>
+                                        <TextBlock Text="{Binding LatestVersion}"
+                                                 FontSize="16"
+                                                 FontWeight="SemiBold"/>
+                                    </StackPanel>                                    <StackPanel>
+                                        <TextBlock Text="Last Checked"
+                                                 Opacity="0.7"
+                                                 FontSize="12"/>
+                                        <TextBlock Text="{Binding LastUpdateCheck, Converter={StaticResource TimeAgoConverter}}"
+                                                 FontSize="16"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <!-- Update Actions -->
+                                <StackPanel Grid.Row="1" 
+                                          Orientation="Horizontal" 
+                                          Margin="0,15,0,0"
+                                          Spacing="10">
+                                    <Button Command="{Binding CheckForUpdatesCommand}"
+                                           Background="#4CAF50"
+                                           Foreground="White"
+                                           Padding="15,8">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <PathIcon Data="M16,12L24,4L16,12L8,4L16,12M16,12L24,20L16,12L8,20L16,12M16,12L12,16L20,16L16,12Z"
+                                                     Width="16" Height="16"/>
+                                            <TextBlock Text="Check for Updates"/>
+                                        </StackPanel>
+                                    </Button>
+
+                                    <Button Command="{Binding InstallUpdateCommand}"
+                                           IsVisible="{Binding UpdateAvailable}"
+                                           IsEnabled="{Binding !IsDownloadingUpdate}"
+                                           Background="#2196F3"
+                                           Foreground="White"
+                                           Padding="15,8">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <PathIcon Data="M13 5v6h1.17L12 13.17 9.83 11H11V5h2m2-2H9v6H5l7 7 7-7h-4V3zm4 15H5v2h14v-2z"
+                                                     Width="16" Height="16"/>
+                                            <TextBlock Text="Install Update"/>
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+
+                                <!-- Status Message -->
+                                <TextBlock Grid.Row="2"
+                                         Text="{Binding UpdateStatus}"
+                                         Margin="0,10,0,0"
+                                         Opacity="0.8"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- Changelog Panel -->
+                        <Border Background="{DynamicResource ListItemBackground}"
+                                CornerRadius="8"
+                                Padding="20"
+                                Margin="0,0,0,20"
+                                IsVisible="{Binding UpdateAvailable}">
+                            <StackPanel>
+                                <TextBlock Text="What's New"
+                                         FontSize="16"
+                                         FontWeight="SemiBold"
+                                         Margin="0,0,0,10"/>
+                                
+                                <TextBlock Text="{Binding ReleaseDate, StringFormat='Release Date: {0}'}"
+                                         Opacity="0.7"
+                                         Margin="0,0,0,10"/>
+
+                                <TextBlock Text="{Binding ReleaseNotes}"
+                                         TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
                     <!-- Credit Panel -->

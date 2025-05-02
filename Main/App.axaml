@@ -35,6 +35,8 @@
                     <Bitmap x:Key="SortIconSource">/Assets/icon/dark/sort.png</Bitmap>
                     <Bitmap x:Key="CloseIconSource">/Assets/icon/dark/close.png</Bitmap>
                     <Bitmap x:Key="AddIconSource">/Assets/icon/dark/add.png</Bitmap>
+                    <Bitmap x:Key="download.png">/Assets/icon/dark/download.png</Bitmap>
+                    <Bitmap x:Key="setting.png">/Assets/icon/dark/setting.png</Bitmap>
                 </ResourceDictionary>
                 
                 <!-- Light Theme Values -->
@@ -54,6 +56,8 @@
                     <Bitmap x:Key="SortIconSource">/Assets/icon/light/sort.png</Bitmap>
                     <Bitmap x:Key="CloseIconSource">/Assets/icon/light/close.png</Bitmap>
                     <Bitmap x:Key="AddIconSource">/Assets/icon/light/add.png</Bitmap>
+                    <Bitmap x:Key="download.png">/Assets/icon/light/download.png</Bitmap>
+                    <Bitmap x:Key="setting.png">/Assets/icon/light/setting.png</Bitmap>
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>

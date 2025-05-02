@@ -390,24 +390,38 @@ public partial class OptionsViewModel : ViewModelBase
     {
         get => _isDownloadingUpdate;
         set => this.RaiseAndSetIfChanged(ref _isDownloadingUpdate, value);
-    }
-
-    private string _updateStatus = "No updates checked";
+    }    private string _updateStatus = "No updates checked";
     public string UpdateStatus
     {
         get => _updateStatus;
         set => this.RaiseAndSetIfChanged(ref _updateStatus, value);
     }
-    
-    public string LastUpdateCheck => _settings.LastUpdateCheck == DateTime.MinValue ? 
+      public string LastUpdateCheck => _settings.LastUpdateCheck == DateTime.MinValue ? 
         "Never" : _settings.LastUpdateCheck.ToString("g");
+    
+    // Expose the actual DateTime object for the converter
+    public DateTime LastUpdateCheckDateTime => _settings.LastUpdateCheck;
+        
+    public string CurrentVersion => UpdateService.Instance.CurrentVersion.ToString();
+
+    public string? ReleaseNotes => UpdateService.Instance.LatestVersion?.ReleaseNotes;
+    
+    public string? ReleaseDate => UpdateService.Instance.LatestVersion?.ReleaseDate;
+    
+    public string? LatestVersion => UpdateService.Instance.LatestVersion?.Version;
 
     // Update commands
     [RelayCommand]
     private async Task CheckForUpdates()
     {
         await UpdateService.Instance.CheckForUpdates();
+        
+        // Raise property changed for all update-related properties
         this.RaisePropertyChanged(nameof(LastUpdateCheck));
+        this.RaisePropertyChanged(nameof(LatestVersion));
+        this.RaisePropertyChanged(nameof(ReleaseNotes));
+        this.RaisePropertyChanged(nameof(ReleaseDate));
+        this.RaisePropertyChanged(nameof(UpdateAvailable));
     }
     
     [RelayCommand]

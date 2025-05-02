@@ -77,6 +77,33 @@ public partial class MainWindow : Window
         var closeButton = this.FindControl<Button>("CloseButton");
         var dragRegion = this.FindControl<Control>("DragRegion");
         var optionsMenuItem = this.FindControl<MenuItem>("OptionsMenuItem");
+        var logoSettingsMenuItem = this.FindControl<MenuItem>("LogoSettingsMenuItem");
+        var logoButton = this.FindControl<Button>("LogoButton");
+        var homeSection = this.FindControl<Grid>("HomeSection");
+        
+        // Set up Logo button flyout width adjustment
+        if (logoButton != null)
+        {
+            logoButton.AttachedToVisualTree += (s, e) => 
+            {
+                if (logoButton.Flyout is MenuFlyout menuFlyout && homeSection != null)
+                {
+                    // Listen for the flyout's opening event
+                    menuFlyout.Opening += (sender, args) =>
+                    {
+                        // Set the width of all menu items to match the home section width
+                        double homeSectionWidth = homeSection.Bounds.Width;
+                        foreach (var item in menuFlyout.Items)
+                        {
+                            if (item is MenuItem menuItem)
+                            {
+                                menuItem.MinWidth = homeSectionWidth;
+                            }
+                        }
+                    };
+                }
+            };
+        }
         
         if (minimizeButton != null)
             minimizeButton.Click += MinimizeButton_Click;
@@ -97,6 +124,12 @@ public partial class MainWindow : Window
         if (optionsMenuItem != null)
         {
             optionsMenuItem.Click += OptionsMenuItem_Click;
+        }
+        
+        // Set up logo settings menu item click
+        if (logoSettingsMenuItem != null)
+        {
+            logoSettingsMenuItem.Click += OptionsMenuItem_Click;
         }
 
         // Subscribe to window state changes

@@ -7,9 +7,9 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
     <AssemblyName>Save Vault</AssemblyName>
-    <Version>0.4.6.5</Version>
-    <FileVersion>0.4.6.5</FileVersion>
-    <AssemblyVersion>0.4.6.5</AssemblyVersion>
+    <Version>0.4.7.2</Version>
+    <FileVersion>0.4.7.2</FileVersion>
+    <AssemblyVersion>0.4.7.2</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>

@@ -34,7 +34,7 @@ jobs:
       
     - name: Rename executable
       run: |
-        Move-Item "./publish/SaveVaultApp.exe" "./publish/SaveVault.exe" -Force
+        Move-Item "./publish/Save Vault.exe" "./publish/SaveVault.exe" -Force
       
     - name: Create Release
       id: create_release

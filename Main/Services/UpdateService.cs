@@ -23,7 +23,8 @@ namespace SaveVaultApp.Services
         private static UpdateService? _instance;
         public static UpdateService Instance => _instance ??= new UpdateService();        private readonly Settings _settings;
         private readonly HttpClient _httpClient;
-        private readonly string _updateUrl = "https://vault.etka.co.uk/download/windows/version.json";
+        private readonly string _platform;
+        private readonly string _updateUrl;
 
         // Current application version from assembly
         public Version CurrentVersion { get; private set; }
@@ -42,9 +43,7 @@ namespace SaveVaultApp.Services
         public event EventHandler? UpdateCheckCompleted;
         public event EventHandler<double>? DownloadProgressChanged;
         public event EventHandler<string>? UpdateStatusChanged;
-        public event EventHandler<bool>? UpdateAvailabilityChanged;
-
-        private UpdateService()
+        public event EventHandler<bool>? UpdateAvailabilityChanged;        private UpdateService()
         {
             _settings = Settings.Load();
             _httpClient = new HttpClient();
@@ -56,7 +55,23 @@ namespace SaveVaultApp.Services
                 new Version(versionAttribute.Version) : 
                 new Version(1, 0, 0);
                 
-            LoggingService.Instance.Info($"Current version: {CurrentVersion}");
+            // Determine platform
+            _platform = GetCurrentPlatform();
+            _updateUrl = $"https://vault.etka.co.uk/download/{_platform}/version.json";
+            
+            LoggingService.Instance.Info($"Current version: {CurrentVersion} on platform: {_platform}");
+        }
+        
+        private string GetCurrentPlatform()
+        {
+            if (OperatingSystem.IsWindows())
+                return "windows";
+            else if (OperatingSystem.IsLinux())
+                return "linux";
+            else if (OperatingSystem.IsMacOS())
+                return "macos";
+            else
+                return "windows"; // Default to Windows if unknown platform
         }
 
         /// <summary>
@@ -165,8 +180,17 @@ namespace SaveVaultApp.Services
             {                string downloadUrl = LatestVersion.DownloadUrl;
                 if (string.IsNullOrEmpty(downloadUrl))
                 {
-                    downloadUrl = $"https://vault.etka.co.uk/download/windows/Save Vault.exe";
-                    LoggingService.Instance.Warning("Using default download URL");
+                    // Use platform-specific default URL
+                    string platform = GetCurrentPlatform();
+                    string fileName = platform switch
+                    {
+                        "windows" => "Save%20Vault.exe",
+                        "linux" => "save-vault",
+                        "macos" => "SaveVault",
+                        _ => "Save%20Vault.exe"
+                    };
+                    downloadUrl = $"https://vault.etka.co.uk/download/{platform}/{fileName}";
+                    LoggingService.Instance.Warning($"Using default download URL for {platform}: {downloadUrl}");
                 }
                 
                 UpdateStatus($"Downloading update v{LatestVersion.Version}...");
@@ -236,30 +260,138 @@ namespace SaveVaultApp.Services
                         UpdateStatus("Update installation failed");
                         return false;
                     }
+                      // Create platform-specific update script
+                    string scriptPath;
+                    string scriptContent;
+                    ProcessStartInfo startInfo;
                     
-                    // Create a batch file to handle the update process
-                    string batchFilePath = Path.Combine(tempDir, "update.bat");
-                    string batchContent = $@"@echo off
+                    if (OperatingSystem.IsWindows())
+                    {
+                        // Windows - use batch file
+                        scriptPath = Path.Combine(tempDir, "update.bat");
+                        scriptContent = $@"@echo off
 echo Updating Save Vault...
 timeout /t 2 /nobreak > nul
 taskkill /f /im ""Save Vault.exe"" > nul 2>&1
 timeout /t 1 /nobreak > nul
 copy /Y ""{updateFilePath}"" ""{currentExePath}""
 start """" ""{currentExePath}""
-del ""{batchFilePath}""
+del ""{scriptPath}""
 del ""{updateFilePath}""
 exit";
 
-                    File.WriteAllText(batchFilePath, batchContent);
-                    
-                    // Run the batch file
-                    var startInfo = new ProcessStartInfo
+                        File.WriteAllText(scriptPath, scriptContent);
+                        
+                        // Run the batch file
+                        startInfo = new ProcessStartInfo
+                        {
+                            FileName = "cmd.exe",
+                            Arguments = $"/C start /min \"\" \"{scriptPath}\"",
+                            UseShellExecute = true,
+                            CreateNoWindow = true
+                        };
+                    }
+                    else if (OperatingSystem.IsLinux())
                     {
-                        FileName = "cmd.exe",
-                        Arguments = $"/C start /min \"\" \"{batchFilePath}\"",
-                        UseShellExecute = true,
-                        CreateNoWindow = true
-                    };
+                        // Linux - use shell script
+                        scriptPath = Path.Combine(tempDir, "update.sh");
+                        scriptContent = $@"#!/bin/bash
+echo ""Updating Save Vault...""
+sleep 2
+pkill -f ""SaveVault""
+sleep 1
+cp -f ""{updateFilePath}"" ""{currentExePath}""
+chmod +x ""{currentExePath}""
+""{currentExePath}"" &
+rm ""{scriptPath}""
+rm ""{updateFilePath}""
+exit";
+
+                        File.WriteAllText(scriptPath, scriptContent);
+                        
+                        // Make script executable
+                        var chmodProcess = new ProcessStartInfo
+                        {
+                            FileName = "chmod",
+                            Arguments = $"+x \"{scriptPath}\"",
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+                        Process.Start(chmodProcess)?.WaitForExit();
+                        
+                        // Run the shell script
+                        startInfo = new ProcessStartInfo
+                        {
+                            FileName = "/bin/bash",
+                            Arguments = $"\"{scriptPath}\"",
+                            UseShellExecute = true,
+                            CreateNoWindow = true
+                        };
+                    }
+                    else if (OperatingSystem.IsMacOS())
+                    {
+                        // macOS - use shell script (similar to Linux)
+                        scriptPath = Path.Combine(tempDir, "update.sh");
+                        scriptContent = $@"#!/bin/bash
+echo ""Updating Save Vault...""
+sleep 2
+pkill -f ""SaveVault""
+sleep 1
+cp -f ""{updateFilePath}"" ""{currentExePath}""
+chmod +x ""{currentExePath}""
+open ""{currentExePath}""
+rm ""{scriptPath}""
+rm ""{updateFilePath}""
+exit";
+
+                        File.WriteAllText(scriptPath, scriptContent);
+                        
+                        // Make script executable
+                        var chmodProcess = new ProcessStartInfo
+                        {
+                            FileName = "chmod",
+                            Arguments = $"+x \"{scriptPath}\"",
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        };
+                        Process.Start(chmodProcess)?.WaitForExit();
+                        
+                        // Run the shell script
+                        startInfo = new ProcessStartInfo
+                        {
+                            FileName = "/bin/bash",
+                            Arguments = $"\"{scriptPath}\"",
+                            UseShellExecute = true,
+                            CreateNoWindow = true
+                        };
+                    }
+                    else
+                    {
+                        // Fallback - use Windows script
+                        LoggingService.Instance.Warning("Unknown platform, using Windows update script");
+                        scriptPath = Path.Combine(tempDir, "update.bat");
+                        scriptContent = $@"@echo off
+echo Updating Save Vault...
+timeout /t 2 /nobreak > nul
+taskkill /f /im ""Save Vault.exe"" > nul 2>&1
+timeout /t 1 /nobreak > nul
+copy /Y ""{updateFilePath}"" ""{currentExePath}""
+start """" ""{currentExePath}""
+del ""{scriptPath}""
+del ""{updateFilePath}""
+exit";
+
+                        File.WriteAllText(scriptPath, scriptContent);
+                        
+                        // Run the batch file
+                        startInfo = new ProcessStartInfo
+                        {
+                            FileName = "cmd.exe",
+                            Arguments = $"/C start /min \"\" \"{scriptPath}\"",
+                            UseShellExecute = true,
+                            CreateNoWindow = true
+                        };
+                    }
                     
                     Process.Start(startInfo);
                     

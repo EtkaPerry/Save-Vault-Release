@@ -3,13 +3,13 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>    <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
     <AssemblyName>Save Vault</AssemblyName>
-    <Version>0.4.3.0</Version>
-    <FileVersion>0.4.3.0</FileVersion>
-    <AssemblyVersion>0.4.3.0</AssemblyVersion>
+    <Version>0.4.6.5</Version>
+    <FileVersion>0.4.6.5</FileVersion>
+    <AssemblyVersion>0.4.6.5</AssemblyVersion>
   </PropertyGroup>
 
   <ItemGroup>

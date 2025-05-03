@@ -277,12 +277,14 @@ function handleRegistration() {
             sendResponse(false, 'Email already exists', null, 409);
             return;
         }
-        
-        // Hash password
+          // Hash password
         $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
         
+        // Get client IP
+        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+        
         // Insert new user
-        $stmt = $db->prepare("INSERT INTO users (username, email, password, created_at) VALUES (?, ?, ?, NOW())");
+        $stmt = $db->prepare("INSERT INTO users (username, email, password, registration_ip, last_login, created_at) VALUES (?, ?, ?, ?, NOW(), NOW())");
         
         // Check if prepare failed
         if ($stmt === false) {
@@ -290,7 +292,7 @@ function handleRegistration() {
             return;
         }
         
-        $stmt->bind_param('sss', $username, $email, $hashedPassword);
+        $stmt->bind_param('ssss', $username, $email, $hashedPassword, $ip);
         
         if (!$stmt->execute()) {
             // Send detailed error message back
@@ -459,19 +461,10 @@ function handleGetUserData($authHeader) {
             'emailNotifications' => (bool)$settingsRow['email_notifications']
         ];
     }
-    
-    // Get user save data
-    $stmt = $db->prepare("SELECT save_data FROM user_saves WHERE user_id = ?");
-    $stmt->bind_param('i', $userData->userId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
-    $saveData = $result->num_rows > 0 ? json_decode($result->fetch_assoc()['save_data'], true) : [];
-    
-    // Prepare response
+      // Prepare response - no cloud saves for now
     $responseData = [
         'settings' => $settings,
-        'data' => $saveData
+        'data' => [] // Empty array since we're not implementing cloud saves yet
     ];
     
     sendResponse(true, 'User data retrieved successfully', ['data' => $responseData]);
@@ -492,31 +485,80 @@ function handleSyncData($authHeader) {
         return;
     }
     
-    $saveData = json_encode($requestData['data']);
-    
-    global $db;
-    
-    // Check if user already has save data
-    $stmt = $db->prepare("SELECT id FROM user_saves WHERE user_id = ?");
-    $stmt->bind_param('i', $userData->userId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
-    if ($result->num_rows === 0) {
-        // Insert new save data
-        $stmt = $db->prepare("INSERT INTO user_saves (user_id, save_data, last_updated) VALUES (?, ?, NOW())");
-        $stmt->bind_param('is', $userData->userId, $saveData);
-    } else {
-        // Update existing save data
-        $stmt = $db->prepare("UPDATE user_saves SET save_data = ?, last_updated = NOW() WHERE user_id = ?");
-        $stmt->bind_param('si', $saveData, $userData->userId);
+    // We're not implementing cloud saves yet, but we'll update user settings if provided
+    if (isset($requestData['data']['settings'])) {
+        $settings = $requestData['data']['settings'];
+        
+        global $db;
+        
+        // Get the existing settings
+        $stmt = $db->prepare("SELECT id FROM user_settings WHERE user_id = ?");
+        $stmt->bind_param('i', $userData->userId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        
+        // Build the settings update
+        $updateFields = [];
+        $updateParams = [];
+        $updateTypes = '';
+        
+        if (isset($settings['autoSync'])) {
+            $updateFields[] = "auto_sync = ?";
+            $updateParams[] = $settings['autoSync'] ? 1 : 0;
+            $updateTypes .= 'i';
+        }
+        
+        if (isset($settings['syncIntervalMinutes'])) {
+            $updateFields[] = "sync_interval = ?";
+            $updateParams[] = $settings['syncIntervalMinutes'];
+            $updateTypes .= 'i';
+        }
+        
+        if (isset($settings['darkMode'])) {
+            $updateFields[] = "dark_mode = ?";
+            $updateParams[] = $settings['darkMode'] ? 1 : 0;
+            $updateTypes .= 'i';
+        }
+        
+        if (isset($settings['reminderEnabled'])) {
+            $updateFields[] = "reminder_enabled = ?";
+            $updateParams[] = $settings['reminderEnabled'] ? 1 : 0;
+            $updateTypes .= 'i';
+        }
+        
+        if (isset($settings['emailNotifications'])) {
+            $updateFields[] = "email_notifications = ?";
+            $updateParams[] = $settings['emailNotifications'] ? 1 : 0;
+            $updateTypes .= 'i';
+        }
+        
+        // Only update if we have fields to update
+        if (!empty($updateFields)) {
+            if ($result->num_rows === 0) {
+                // Create default settings if they don't exist
+                $stmt = $db->prepare("INSERT INTO user_settings (user_id, auto_sync, sync_interval, dark_mode) VALUES (?, 1, 60, 1)");
+                $stmt->bind_param('i', $userData->userId);
+                $stmt->execute();
+            }
+            
+            // Add the user_id to the params and types
+            $updateParams[] = $userData->userId;
+            $updateTypes .= 'i';
+            
+            // Update the settings
+            $query = "UPDATE user_settings SET " . implode(", ", $updateFields) . " WHERE user_id = ?";
+            $stmt = $db->prepare($query);
+            
+            // Bind parameters dynamically
+            if (!empty($updateParams)) {
+                $stmt->bind_param($updateTypes, ...$updateParams);
+                $stmt->execute();
+            }
+        }
     }
     
-    if ($stmt->execute()) {
-        sendResponse(true, 'Data synced successfully');
-    } else {
-        sendResponse(false, 'Failed to sync data', null, 500);
-    }
+    // Send success response - cloud saves are not implemented yet
+    sendResponse(true, 'Settings synced successfully');
 }
 
 /**

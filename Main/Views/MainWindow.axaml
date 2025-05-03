@@ -65,9 +65,7 @@
                     <Path Data="M 0,0 L 10,10 M 0,10 L 10,0" Stroke="{DynamicResource TextColor}" StrokeThickness="1" VerticalAlignment="Center" HorizontalAlignment="Center" />
                 </Button>
             </StackPanel>
-        </Grid>
-
-        <!-- Status Bar -->        <Grid DockPanel.Dock="Bottom" Background="{DynamicResource StatusBarBackground}" Height="22">
+        </Grid>        <!-- Status Bar -->        <Grid DockPanel.Dock="Bottom" Background="{DynamicResource StatusBarBackground}" Height="22">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -79,34 +77,8 @@
                        VerticalAlignment="Center" 
                        Margin="10,0,0,0" 
                        FontSize="11"/>
-                       
-            <!-- Update status indicator -->
-            <Button Grid.Column="1"
-                    Margin="0,0,5,0"
-                    Height="18"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    Padding="5,0"
-                    IsVisible="{Binding UpdateAvailable}"
-                    Command="{Binding InstallUpdateCommand}"
-                    ToolTip.Tip="Update available. Click to install.">
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Update Available" FontSize="11" VerticalAlignment="Center" Margin="0,0,5,0" />
-                    <TextBlock Text="↑" FontSize="11" FontWeight="Bold" VerticalAlignment="Center" />
-                </StackPanel>
-            </Button>            <Panel Grid.Column="2" 
-                   Margin="0,0,10,0"
-                   IsVisible="{Binding !IsHoveringNextSave}">
-                <TextBlock Text="{Binding NextSaveText}"
-                         VerticalAlignment="Center"
-                         FontSize="11"/>
-                <Border Background="Transparent"
-                        PointerEntered="NextSaveButton_PointerEntered"/>
-            </Panel>
-                       
-
-            <!-- Running Apps Indicator -->
-            <StackPanel Grid.Column="1" 
+                         <!-- Running Apps Indicator -->
+            <StackPanel Grid.Column="2" 
                        Orientation="Horizontal"
                        HorizontalAlignment="Right"
                        Margin="0,0,10,0">

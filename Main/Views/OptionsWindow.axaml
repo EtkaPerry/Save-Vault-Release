@@ -390,32 +390,37 @@
                                     </Button>
                                 </StackPanel>
 
-                                <!-- Status Message -->
-                                <TextBlock Grid.Row="2"
+                                <!-- Status Message -->                                <TextBlock Grid.Row="2"
                                          Text="{Binding UpdateStatus}"
                                          Margin="0,10,0,0"
                                          Opacity="0.8"/>
                             </Grid>
-                        </Border>
-
-                        <!-- Changelog Panel -->
+                        </Border>                        <!-- Changelog Panel -->
                         <Border Background="{DynamicResource ListItemBackground}"
                                 CornerRadius="8"
                                 Padding="20"
                                 Margin="0,0,0,20"
-                                IsVisible="{Binding UpdateAvailable}">
-                            <StackPanel>
-                                <TextBlock Text="What's New"
-                                         FontSize="16"
-                                         FontWeight="SemiBold"
-                                         Margin="0,0,0,10"/>
+                                IsVisible="{Binding LatestVersion, Converter={x:Static ObjectConverters.IsNotNull}}">                            <StackPanel>
+                                <!-- Header with title and date -->
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    
+                                    <TextBlock Grid.Column="0"
+                                             Text="{Binding UpdateAvailable, Converter={x:Static conv:BoolToStringConverter.Instance}, ConverterParameter='What\'s New,Release Notes'}"
+                                             FontSize="16"
+                                             FontWeight="SemiBold"/>
+                                    
+                                    <TextBlock Grid.Column="1"
+                                             Text="{Binding ReleaseDate, StringFormat='Release Date: {0}'}"
+                                             Opacity="0.7"
+                                             VerticalAlignment="Center"/>
+                                </Grid>
                                 
-                                <TextBlock Text="{Binding ReleaseDate, StringFormat='Release Date: {0}'}"
-                                         Opacity="0.7"
-                                         Margin="0,0,0,10"/>
-
-                                <TextBlock Text="{Binding ReleaseNotes}"
-                                         TextWrapping="Wrap"/>
+                                <TextBlock TextWrapping="Wrap"
+                                         Text="{Binding ReleaseNotes, Converter={x:Static conv:NewlineConverter.Instance}}"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>

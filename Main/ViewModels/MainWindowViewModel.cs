@@ -24,6 +24,9 @@ public partial class MainWindowViewModel : ViewModelBase
     private readonly Settings _settings;
     public Settings Settings => _settings;
     
+    private readonly AppData _appData;
+    public AppData AppData => _appData;
+    
     public ObservableCollection<ApplicationInfo> InstalledApps { get; } = new();
     public ObservableCollection<ApplicationInfo> HiddenGames { get; } = new();
 
@@ -154,6 +157,17 @@ public partial class MainWindowViewModel : ViewModelBase
             
             // Now reload the settings from file
             _settings = Settings.Load();
+        }
+        
+        // Load or initialize appdata
+        _appData = AppData.Load();
+        
+        // If this is the first run, migrate settings to app data
+        if (!File.Exists(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "SaveVault", "appdata.json")))
+        {
+            AppData.MigrateFromSettings(_settings);
         }
         
         _selectedSortOption = _settings.SortOption;
@@ -290,18 +304,25 @@ public partial class MainWindowViewModel : ViewModelBase
                         if (!(app.HasCustomSettings ? app.CustomSettings.AutoSaveEnabled : _settings.GlobalAutoSaveEnabled))
                         {
                             continue; // Skip if auto-save is disabled for this app
-                        }
-
-                        // Get the last backup time
+                        }                // Get the last backup time
                         DateTime lastBackup;
                         if (app.LastBackupTime != DateTime.MinValue)
                         {
                             lastBackup = app.LastBackupTime;
                         }
+                        else if (_appData.LastBackupTimes.TryGetValue(app.ExecutablePath, out DateTime appDataLastBackup))
+                        {
+                            lastBackup = appDataLastBackup;
+                            app.LastBackupTime = appDataLastBackup; // Sync the LastBackupTime
+                        }
                         else if (_settings.LastBackupTimes.TryGetValue(app.ExecutablePath, out DateTime settingsLastBackup))
                         {
+                            // Legacy fallback to settings if not in appdata yet
                             lastBackup = settingsLastBackup;
                             app.LastBackupTime = settingsLastBackup; // Sync the LastBackupTime
+                            // Store in appdata for future use
+                            _appData.LastBackupTimes[app.ExecutablePath] = settingsLastBackup;
+                            _appData.Save();
                         }
                         else
                         {
@@ -432,13 +453,12 @@ public partial class MainWindowViewModel : ViewModelBase
                     Timestamp = backupInfoVM.Timestamp,
                     Description = backupInfoVM.Description,
                     IsAutoBackup = backupInfoVM.IsAutoBackup
-                };
-
-                // Update app's backup history and last backup time (in memory)
+                };                // Update app's backup history and last backup time (in memory)
                 app.LastBackupTime = backupTimestamp;
                 
-                // Update the last backup time in settings *before* saving
-                _settings.LastBackupTimes[app.ExecutablePath] = backupTimestamp;
+                // Update the last backup time in appdata *before* saving
+                _appData.LastBackupTimes[app.ExecutablePath] = backupTimestamp;
+                _appData.Save();
                   // Add to history on UI thread
                 Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                 {
@@ -823,10 +843,9 @@ public partial class MainWindowViewModel : ViewModelBase
             AllInstalledApps.Clear();
             IsLoading = true;
             StatusMessage = "Starting application search...";
-        });
-
-        // If there is no cache, do a full search immediately
-        if (_settings.KnownApplicationPaths == null || _settings.KnownApplicationPaths.Count == 0)
+        });        // If there is no cache, do a full search immediately
+        if ((_appData.KnownApplicationPaths == null || _appData.KnownApplicationPaths.Count == 0) &&
+            (_settings.KnownApplicationPaths == null || _settings.KnownApplicationPaths.Count == 0))
         {
             if (OperatingSystem.IsWindows())
             {
@@ -977,15 +996,21 @@ public partial class MainWindowViewModel : ViewModelBase
                     }
                     if (app.BackupHistory.Count > 0)
                         app.LastBackupTime = app.BackupHistory.Max(b => b.Timestamp);
-                }
-
-                // Apply customizations
-                if (_settings.CustomNames != null && _settings.CustomNames.TryGetValue(exePath, out string? customName) && !string.IsNullOrWhiteSpace(customName))
+                }                // Apply customizations from AppData
+                if (_appData.CustomNames != null && _appData.CustomNames.TryGetValue(exePath, out string? customName) && !string.IsNullOrWhiteSpace(customName))
                     app.Name = customName;
-                if (_settings.CustomSavePaths != null && _settings.CustomSavePaths.TryGetValue(exePath, out string? customSavePath) && !string.IsNullOrWhiteSpace(customSavePath))
+                else if (_settings.CustomNames != null && _settings.CustomNames.TryGetValue(exePath, out string? legacyCustomName) && !string.IsNullOrWhiteSpace(legacyCustomName))
+                    app.Name = legacyCustomName; // Legacy fallback
+                    
+                if (_appData.CustomSavePaths != null && _appData.CustomSavePaths.TryGetValue(exePath, out string? customSavePath) && !string.IsNullOrWhiteSpace(customSavePath))
                     app.SavePath = customSavePath;
-                if (_settings.HiddenApps != null)
-                    app.IsHidden = _settings.HiddenApps.Contains(exePath);
+                else if (_settings.CustomSavePaths != null && _settings.CustomSavePaths.TryGetValue(exePath, out string? legacyCustomSavePath) && !string.IsNullOrWhiteSpace(legacyCustomSavePath))
+                    app.SavePath = legacyCustomSavePath; // Legacy fallback
+                    
+                if (_appData.HiddenApps != null)
+                    app.IsHidden = _appData.HiddenApps.Contains(exePath);
+                else if (_settings.HiddenApps != null)
+                    app.IsHidden = _settings.HiddenApps.Contains(exePath); // Legacy fallback
                 LoadAppSettings(app);
 
                 AllInstalledApps.Add(app);
@@ -1729,29 +1754,37 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         // Use the new SaveLocationDetector utility class to detect save paths
         var result = Utilities.SaveLocationDetector.DetectSavePath(app);
-        
-        if (!string.IsNullOrEmpty(result.GameName))
+          if (!string.IsNullOrEmpty(result.GameName))
         {
             // Only update if not already customized by the user
-            if (!_settings.CustomNames.ContainsKey(app.ExecutablePath))
+            if (!_appData.CustomNames.ContainsKey(app.ExecutablePath) && !_settings.CustomNames.ContainsKey(app.ExecutablePath))
             {
                 app.Name = result.GameName;
             }
         }
         
         return result.SavePath;
-    }[RelayCommand]
+    }    [RelayCommand]
     public void ResetCache()
     {
         // Clear all saved data in settings
         _settings.LastUsedTimes.Clear();
+        _settings.LastBackupTimes.Clear();
         _settings.CustomNames.Clear();
         _settings.CustomSavePaths.Clear();
         _settings.HiddenApps.Clear();
-        _settings.KnownApplicationPaths.Clear(); // Clear known applications cache
+        _settings.KnownApplicationPaths.Clear();
         _settings.BackupHistory.Clear(); // Clear backup history
         _settings.AppSettings.Clear(); // Clear app-specific settings
         _settings.Save();
+        
+        // Clear all saved data in AppData
+        _appData.LastBackupTimes.Clear();
+        _appData.CustomNames.Clear();
+        _appData.CustomSavePaths.Clear();
+        _appData.HiddenApps.Clear();
+        _appData.KnownApplicationPaths.Clear();
+        _appData.Save();
         
         // Update UI status
         StatusMessage = "Completely resetting program cache and rescanning...";
@@ -1863,16 +1896,14 @@ public partial class MainWindowViewModel : ViewModelBase
         if (appInList != null)
         {
             appInList.Name = newName;
-        }
-
-        // Save custom names to settings
-        if (_settings.CustomNames == null)
+        }        // Save custom names to AppData
+        if (_appData.CustomNames == null)
         {
-            _settings.CustomNames = new Dictionary<string, string>();
+            _appData.CustomNames = new Dictionary<string, string>();
         }
         
-        _settings.CustomNames[executablePath] = newName;
-        _settings.Save();
+        _appData.CustomNames[executablePath] = newName;
+        _appData.Save();
 
         // Close all edit fields
         CancelAll();
@@ -1934,14 +1965,12 @@ public partial class MainWindowViewModel : ViewModelBase
         if (appInList != null)
         {
             appInList.SavePath = newPath;
-        }
-
-        // Initialize CustomSavePaths if null
-        _settings.CustomSavePaths ??= new Dictionary<string, string>();
+        }        // Initialize CustomSavePaths if null
+        _appData.CustomSavePaths ??= new Dictionary<string, string>();
         
         // Save or update custom save path
-        _settings.CustomSavePaths[executablePath] = newPath;
-        _settings.Save();
+        _appData.CustomSavePaths[executablePath] = newPath;
+        _appData.Save();
 
         // Close all edit fields
         CancelAll();
@@ -2055,14 +2084,13 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 appInList.SavePath = newPath;
             }
-            
-            // Save custom save path to settings
-            if (_settings.CustomSavePaths == null)
+              // Save custom save path to AppData
+            if (_appData.CustomSavePaths == null)
             {
-                _settings.CustomSavePaths = new Dictionary<string, string>();
+                _appData.CustomSavePaths = new Dictionary<string, string>();
             }
             
-            _settings.CustomSavePaths[executablePath] = newPath;
+            _appData.CustomSavePaths[executablePath] = newPath;
             StatusMessage = $"Updated details for '{SelectedApp.Name}'";
         }
         
@@ -2126,17 +2154,16 @@ public partial class MainWindowViewModel : ViewModelBase
 
         // Toggle hidden state
         appToToggle.IsHidden = !appToToggle.IsHidden;
-        
-        // Save the hidden state in settings
-        if (_settings.HiddenApps == null)
+          // Save the hidden state in AppData
+        if (_appData.HiddenApps == null)
         {
-            _settings.HiddenApps = new HashSet<string>();
+            _appData.HiddenApps = new HashSet<string>();
         }
         
-        // Update the hidden apps collection in settings
+        // Update the hidden apps collection in AppData
         if (appToToggle.IsHidden)
         {
-            _settings.HiddenApps.Add(appToToggle.ExecutablePath);
+            _appData.HiddenApps.Add(appToToggle.ExecutablePath);
             StatusMessage = $"'{appToToggle.Name}' is now marked as hidden";
             
             // Add to hidden games list (for the hidden section)
@@ -2147,10 +2174,9 @@ public partial class MainWindowViewModel : ViewModelBase
             
             // Keep in the main list but update UI
             // Note: We no longer remove from InstalledApps
-        }
-        else
+        }        else
         {
-            _settings.HiddenApps.Remove(appToToggle.ExecutablePath);
+            _appData.HiddenApps.Remove(appToToggle.ExecutablePath);
             StatusMessage = $"'{appToToggle.Name}' is no longer hidden";
             
             // Remove from hidden games list
@@ -2165,7 +2191,7 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         }
         
-        _settings.Save();
+        _appData.Save();
     }
 
     [RelayCommand]
@@ -2248,24 +2274,22 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             Debug.WriteLine($"Error updating running applications: {ex.Message}");
         }
-    }
-
-    private void SaveNewAppsToSettings()
+    }    private void SaveNewAppsToSettings()
     {
         try
         {
             // Add all executable paths to known applications
             foreach (var app in AllInstalledApps)
             {
-                _settings.KnownApplicationPaths.Add(app.ExecutablePath);
+                _appData.KnownApplicationPaths.Add(app.ExecutablePath);
             }
             
-            // Save settings to persist them
-            _settings.Save();
+            // Save appdata to persist them
+            _appData.Save();
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Error saving new apps to settings: {ex.Message}");
+            Debug.WriteLine($"Error saving new apps to app data: {ex.Message}");
         }
     }
 
@@ -2754,13 +2778,13 @@ public partial class MainWindowViewModel : ViewModelBase
                                 }
                                 
                                 // Save this app's path in known applications
-                                _settings.KnownApplicationPaths.Add(newApp.ExecutablePath);
+                                _appData.KnownApplicationPaths.Add(newApp.ExecutablePath);
                             }
                               // Apply sort to maintain order
                             ApplySort();
                             
                             // Save settings to persist the new apps
-                            _settings.Save();
+                            _appData.Save();
                             
                             // Calculate statistics after new apps are added
                             int totalPrograms = AllInstalledApps.Count;
@@ -3231,10 +3255,9 @@ public partial class MainWindowViewModel : ViewModelBase
             // Add to collections
             AllInstalledApps.Add(app);
             InstalledApps.Add(app);
-            
-            // Add to known applications
-            _settings.KnownApplicationPaths.Add(app.ExecutablePath);
-            _settings.Save();
+              // Add to known applications
+            _appData.KnownApplicationPaths.Add(app.ExecutablePath);
+            _appData.Save();
             
             // Apply sort to maintain order
             ApplySort();

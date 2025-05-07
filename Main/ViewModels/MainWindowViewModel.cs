@@ -21,7 +21,10 @@ namespace SaveVaultApp.ViewModels;
 
 public partial class MainWindowViewModel : ViewModelBase
 {    private readonly Settings _settings;
-    public Settings Settings => _settings;    private readonly AppData _appData = null!;
+    public Settings Settings => _settings;    
+    
+    // Changed from readonly with null! to just private field that can be properly initialized
+    private AppData _appData;
     public AppData AppData => _appData; // This now serves the purpose of the former AppData
     
     public ObservableCollection<ApplicationInfo> InstalledApps { get; } = new();
@@ -154,16 +157,51 @@ public partial class MainWindowViewModel : ViewModelBase
             
             // Now reload the settings from file
             _settings = Settings.Load();
-        }        // Load or initialize appdata
-        _appData = AppData.Load() ?? new AppData();
+        }        // Load or initialize appdata with proper null handling
+        try
+        {
+            _appData = AppData.Load();
+            
+            // Ensure we have a valid instance
+            if (_appData == null)
+            {
+                _appData = new AppData();
+                Debug.WriteLine("Created new AppData instance because Load() returned null");
+            }
+            
+            // Make sure we have valid collections in AppData
+            _appData.LastBackupTimes ??= new Dictionary<string, DateTime>();
+            _appData.CustomNames ??= new Dictionary<string, string>();
+            _appData.CustomSavePaths ??= new Dictionary<string, string>();
+            _appData.HiddenApps ??= new HashSet<string>();
+            _appData.KnownApplicationPaths ??= new HashSet<string>();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error loading AppData: {ex.Message}");
+            
+            // Create a new instance if anything fails
+            _appData = new AppData();
+            _appData.LastBackupTimes = new Dictionary<string, DateTime>();
+            _appData.CustomNames = new Dictionary<string, string>();
+            _appData.CustomSavePaths = new Dictionary<string, string>();
+            _appData.HiddenApps = new HashSet<string>();
+            _appData.KnownApplicationPaths = new HashSet<string>();
+        }
         
-        // If this is the first run, migrate settings to app data
-        if (!File.Exists(Path.Combine(
+        // If this is the first run or appdata is empty, migrate settings to app data
+        var appDataExists = File.Exists(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "SaveVault", "appdata.json")))
+            "SaveVault", "appdata.json"));
+            
+        if (!appDataExists || 
+            (_appData.KnownApplicationPaths.Count == 0 && 
+             _appData.CustomNames.Count == 0 && 
+             _appData.CustomSavePaths.Count == 0 &&
+             _appData.LastBackupTimes.Count == 0))
         {
             AppData.MigrateFromSettings(_settings);
-        }        // Using AppData directly, no need for AppData
+        }
         
         _selectedSortOption = _settings.SortOption;
         _isHiddenGamesExpanded = _settings.HiddenGamesExpanded;
@@ -843,10 +881,11 @@ public partial class MainWindowViewModel : ViewModelBase
             AllInstalledApps.Clear();
             IsLoading = true;
             StatusMessage = "Starting application search...";
-        });
-          // If there is no cache, do a full search immediately
-        if ((_appData.KnownApplicationPaths == null || _appData.KnownApplicationPaths.Count == 0) &&
-            (_settings.KnownApplicationPaths == null || _settings.KnownApplicationPaths.Count == 0))
+        });          // Make sure we have a valid KnownApplicationPaths collection
+        _appData.KnownApplicationPaths ??= new HashSet<string>();
+        
+        // If there is no cache in AppData, do a full search immediately
+        if (_appData.KnownApplicationPaths.Count == 0)
         {
             if (OperatingSystem.IsWindows())
             {
@@ -867,11 +906,13 @@ public partial class MainWindowViewModel : ViewModelBase
                                     if (app.IsHidden)
                                         HiddenGames.Add(app);
                                     else
-                                        InstalledApps.Add(app);
-
-                                    // Save to cache for next time
-                                    if (_settings.KnownApplicationPaths != null && !_settings.KnownApplicationPaths.Contains(app.ExecutablePath))
-                                        _settings.KnownApplicationPaths.Add(app.ExecutablePath);
+                                        InstalledApps.Add(app);                                    // Save to AppData cache for next time
+                                    if (!_appData.KnownApplicationPaths.Contains(app.ExecutablePath))
+                                    {
+                                        _appData.KnownApplicationPaths.Add(app.ExecutablePath);
+                                        // Save AppData to persist the new app path
+                                        _appData.Save();
+                                    }
 
                                     ApplySort();
                                     // Update status message with progress
@@ -2787,14 +2828,16 @@ public partial class MainWindowViewModel : ViewModelBase
                                 {
                                     InstalledApps.Add(newApp);
                                 }
-                                
-                                // Save this app's path in known applications
-                                _appData.KnownApplicationPaths.Add(newApp.ExecutablePath);
+                                  // Save this app's path in known applications
+                                if (!_appData.KnownApplicationPaths.Contains(newApp.ExecutablePath))
+                                {
+                                    _appData.KnownApplicationPaths.Add(newApp.ExecutablePath);
+                                }
                             }
                               // Apply sort to maintain order
                             ApplySort();
                             
-                            // Save AppData to persist the new apps
+                            // Save AppData to persist the new apps and their custom settings
                             _appData.Save();
                             
                             // Calculate statistics after new apps are added

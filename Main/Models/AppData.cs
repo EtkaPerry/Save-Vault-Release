@@ -73,8 +73,7 @@ public class AppData
         _instance = newAppData;
         return newAppData;
     }
-    
-    public void Save()
+      public void Save()
     {
         try
         {
@@ -90,11 +89,21 @@ public class AppData
                 Directory.CreateDirectory(directory);
             }
 
-            var options = new JsonSerializerOptions { WriteIndented = true };
+            // Make sure we have valid collections before saving
+            KnownApplicationPaths ??= new HashSet<string>();
+            LastBackupTimes ??= new Dictionary<string, DateTime>();
+            CustomNames ??= new Dictionary<string, string>();
+            CustomSavePaths ??= new Dictionary<string, string>();
+            HiddenApps ??= new HashSet<string>();            var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(this, options);
             File.WriteAllText(AppDataPath, json);
             
             Debug.WriteLine($"App data saved successfully to {AppDataPath}");
+            Debug.WriteLine($"  - Known Applications: {KnownApplicationPaths?.Count ?? 0}");
+            Debug.WriteLine($"  - Custom Names: {CustomNames?.Count ?? 0}");
+            Debug.WriteLine($"  - Custom Save Paths: {CustomSavePaths?.Count ?? 0}");
+            Debug.WriteLine($"  - Last Backup Times: {LastBackupTimes?.Count ?? 0}");
+            Debug.WriteLine($"  - Hidden Apps: {HiddenApps?.Count ?? 0}");
         }
         catch (Exception ex)
         {
@@ -103,38 +112,63 @@ public class AppData
     }    // Migration helper method to migrate data from Settings to AppData
     public static void MigrateFromSettings(Settings settings)
     {
-        if (settings == null) return;
-        
-        var appData = Load();
-        
-        // Copy data from settings to app data
-        foreach (var item in settings.LastBackupTimes)
-            appData.LastBackupTimes[item.Key] = item.Value;
+        try
+        {
+            // Ensure we have an instance
+            var appData = Instance ?? new AppData();
             
-        foreach (var item in settings.CustomNames)
-            appData.CustomNames[item.Key] = item.Value;
+            // Migrate LastBackupTimes
+            if (settings.LastBackupTimes != null)
+            {
+                foreach (var item in settings.LastBackupTimes)
+                {
+                    appData.LastBackupTimes[item.Key] = item.Value;
+                }
+            }
             
-        foreach (var item in settings.CustomSavePaths)
-            appData.CustomSavePaths[item.Key] = item.Value;
+            // Migrate CustomNames
+            if (settings.CustomNames != null)
+            {
+                foreach (var item in settings.CustomNames)
+                {
+                    appData.CustomNames[item.Key] = item.Value;
+                }
+            }
             
-        foreach (var item in settings.HiddenApps)
-            appData.HiddenApps.Add(item);
+            // Migrate CustomSavePaths
+            if (settings.CustomSavePaths != null)
+            {
+                foreach (var item in settings.CustomSavePaths)
+                {
+                    appData.CustomSavePaths[item.Key] = item.Value;
+                }
+            }
             
-        foreach (var item in settings.KnownApplicationPaths)
-            appData.KnownApplicationPaths.Add(item);
+            // Migrate HiddenApps
+            if (settings.HiddenApps != null)
+            {
+                foreach (var item in settings.HiddenApps)
+                {
+                    appData.HiddenApps.Add(item);
+                }
+            }
             
-        // Save the app data
-        appData.Save();
-        
-        // Clear these from settings now that they're migrated
-        // We don't clear them to avoid data loss in case of issues during migration
-        // settings.LastBackupTimes.Clear();
-        // settings.CustomNames.Clear();
-        // settings.CustomSavePaths.Clear();
-        // settings.HiddenApps.Clear();
-        // settings.KnownApplicationPaths.Clear();
-        // settings.Save();
-        
-        Debug.WriteLine("Settings data successfully migrated to App Data");
+            // Migrate KnownApplicationPaths
+            if (settings.KnownApplicationPaths != null)
+            {
+                foreach (var path in settings.KnownApplicationPaths)
+                {
+                    appData.KnownApplicationPaths.Add(path);
+                }
+            }
+            
+            // Save the migrated data
+            appData.Save();
+            Debug.WriteLine("Successfully migrated settings to AppData");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error migrating settings to AppData: {ex.Message}");
+        }
     }
 }

@@ -13,6 +13,7 @@ using Avalonia.Platform;
 using Avalonia.Media;
 using SaveVaultApp.Services;
 using Avalonia.Markup.Xaml;
+using System.Threading;
 
 namespace SaveVaultApp.Views;
 
@@ -245,26 +246,67 @@ public partial class MainWindow : Window
                 _trayIcon = null;
             }
         }
-    }
-
+    }    // Timer to debounce window resize events
+    private System.Threading.Timer? _resizeDebounceTimer;
+    private bool _isSavingWindowSize = false;
+    
     private void MainWindow_PropertyChanged(object? sender, Avalonia.AvaloniaPropertyChangedEventArgs e)
     {
+        if (_isSavingWindowSize) return; // Prevent recursive saves
+        
         if (e.Property.Name == nameof(WindowState))
         {
             _settings.IsMaximized = WindowState == WindowState.Maximized;
-            _settings.Save();
-        }
-        else if (e.Property.Name == nameof(Position) || e.Property.Name == nameof(Width) || e.Property.Name == nameof(Height))
-        {
-            if (WindowState != WindowState.Maximized)
+            
+            if (!_settings.IsMaximized && Width > 100 && Height > 100)
             {
+                // When exiting maximized state, immediately capture the restored size
                 _settings.WindowPositionX = Position.X;
                 _settings.WindowPositionY = Position.Y;
                 _settings.WindowWidth = Width;
                 _settings.WindowHeight = Height;
-                _settings.Save();
+                System.Diagnostics.Debug.WriteLine($"Exiting maximized: saving size {Width}x{Height}");
             }
+            
+            SaveSettingsWithDebounce();
         }
+        else if ((e.Property.Name == nameof(Position) || e.Property.Name == nameof(Width) || e.Property.Name == nameof(Height))
+                && WindowState != WindowState.Maximized && Width > 100 && Height > 100)
+        {
+            SaveSettingsWithDebounce();
+        }
+    }
+    
+    private void SaveSettingsWithDebounce()
+    {
+        // Cancel existing timer
+        _resizeDebounceTimer?.Dispose();
+        
+        // Create new timer with 500ms delay
+        _resizeDebounceTimer = new System.Threading.Timer(_ => 
+        {
+            // Invoke on UI thread
+            Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => 
+            {
+                if (WindowState != WindowState.Maximized && Width > 100 && Height > 100)
+                {
+                    try
+                    {
+                        _isSavingWindowSize = true;
+                        System.Diagnostics.Debug.WriteLine($"Saving window size: {Width}x{Height}");
+                        _settings.WindowPositionX = Position.X;
+                        _settings.WindowPositionY = Position.Y;
+                        _settings.WindowWidth = Width;
+                        _settings.WindowHeight = Height;
+                        _settings.Save();
+                    }
+                    finally
+                    {
+                        _isSavingWindowSize = false;
+                    }
+                }
+            });
+        }, null, 500, System.Threading.Timeout.Infinite);
     }
     
     private void MinimizeButton_Click(object? sender, RoutedEventArgs e)

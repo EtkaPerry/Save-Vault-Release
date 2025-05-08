@@ -20,11 +20,26 @@ public class Settings
     // Add static instance
     private static Settings? _instance;
     public static Settings? Instance => _instance;    
-      private static readonly string SettingsPath = Path.Combine(
+      private static string _settingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "SaveVault",
         "settings.json" // Make sure this is lowercase to match other files
     );
+    
+    // Changed to use the _settingsPath field instead of a readonly string
+    private static string SettingsPath => _settingsPath;
+    
+    // Method to use alternative settings path
+    public static void UseAlternativeSettingsPath(string alternativePath)
+    {
+        _settingsPath = alternativePath;
+    }
+    
+    // Public method to get the current settings path
+    public static string GetSettingsPath()
+    {
+        return _settingsPath;
+    }
     
     // User authentication settings
     public string? LoggedInUser { get; set; }
@@ -98,13 +113,18 @@ public class Settings
             {
                 Debug.WriteLine($"Creating settings directory during load: {directory}");
                 Directory.CreateDirectory(directory);
-            }
-
-            if (File.Exists(SettingsPath))
+            }            if (File.Exists(SettingsPath))
             {
                 Debug.WriteLine($"Settings file exists at: {SettingsPath}");
                 var json = File.ReadAllText(SettingsPath);
-                var settings = JsonSerializer.Deserialize<Settings>(json) ?? new Settings();
+                  // Use the same options for deserialize as we do for serialize
+                var options = new JsonSerializerOptions { 
+                    WriteIndented = true,
+                    IncludeFields = true,
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+                    ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles
+                };
+                var settings = JsonSerializer.Deserialize<Settings>(json, options) ?? new Settings();
                 
                 // Initialize collections if they're null to prevent null reference exceptions
                 settings.LastUsedTimes ??= new();
@@ -124,10 +144,19 @@ public class Settings
         {
             Debug.WriteLine($"Error loading settings: {ex.Message}");
         }
-        
-        // Return new settings if file doesn't exist or loading fails
+          // Return new settings if file doesn't exist or loading fails
         var newSettings = new Settings();
         _instance = newSettings;
+        
+        // Explicitly save the new settings file if it didn't exist before
+        try {
+            Debug.WriteLine("Creating new settings file since one doesn't exist");
+            newSettings.ForceSave();
+        }
+        catch (Exception ex) {
+            Debug.WriteLine($"Failed to create new settings file: {ex.Message}");
+        }
+        
         return newSettings;
     }    public void Save()
     {
@@ -187,10 +216,13 @@ public class Settings
                 {
                     Directory.CreateDirectory(directory);
                     logger.Debug($"Created settings directory: {directory}");
-                }
-
-                logger.Debug("Serializing settings to JSON");
-                var options = new JsonSerializerOptions { WriteIndented = true };
+                }                logger.Debug("Serializing settings to JSON");
+                var options = new JsonSerializerOptions { 
+                    WriteIndented = true,
+                    IncludeFields = true,
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+                    ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles
+                };
                 var json = JsonSerializer.Serialize(this, options);
                 logger.Debug($"JSON serialization complete, length: {json.Length}");
                 
@@ -244,23 +276,87 @@ public class Settings
                 System.Threading.Thread.Sleep(100);
             }
         }
-        
-        if (!saved)
+          if (!saved)
         {
             logger.Error($"CRITICAL: Failed to save settings after {maxRetries} attempts!");
-            
-            // As a last resort, try a very simple approach
+              
+            // First try a simplified approach
             try {
-                logger.Debug("Attempting emergency save with minimal JSON");
-                File.WriteAllText(SettingsPath, "{\"Theme\":\"System\"}");
+                logger.Debug("Attempting emergency save with simplified serialization");
+                var emergencyOptions = new JsonSerializerOptions { 
+                    WriteIndented = true, 
+                    IncludeFields = true 
+                };
+                var emergencyJson = JsonSerializer.Serialize(this, emergencyOptions);
+                File.WriteAllText(SettingsPath, emergencyJson);
                 logger.Debug("Emergency save attempt complete");
+                
+                if (File.Exists(SettingsPath)) {
+                    logger.Info($"Emergency save succeeded, file size: {new FileInfo(SettingsPath).Length} bytes");
+                    saved = true;
+                }
             } 
             catch (Exception ex) {
-                logger.Error($"Even emergency save failed: {ex.Message}");
+                logger.Error($"Emergency save failed: {ex.Message}");
+                
+                // As an absolute last resort, try saving with minimal properties
+                try {
+                    logger.Debug("Attempting bare-minimum save");                    // Create a more comprehensive settings object with essential properties
+                    var minimalSettings = new { 
+                        Theme = this.Theme,
+                        WindowWidth = this.WindowWidth,
+                        WindowHeight = this.WindowHeight,
+                        WindowPositionX = this.WindowPositionX,
+                        WindowPositionY = this.WindowPositionY,
+                        IsMaximized = this.IsMaximized,
+                        SortOption = this.SortOption,
+                        HiddenGamesExpanded = this.HiddenGamesExpanded,
+                        OptionsWindowWidth = this.OptionsWindowWidth,
+                        OptionsWindowHeight = this.OptionsWindowHeight
+                    };
+                    
+                    var minimalJson = JsonSerializer.Serialize(minimalSettings, new JsonSerializerOptions { 
+                        WriteIndented = true,
+                        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+                        ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles
+                    });
+                    File.WriteAllText(SettingsPath, minimalJson);
+                    
+                    if (File.Exists(SettingsPath)) {
+                        logger.Info($"Minimal save succeeded, file size: {new FileInfo(SettingsPath).Length} bytes");
+                    }
+                }
+                catch (Exception minEx) {
+                    logger.Critical($"All save attempts failed: {minEx.Message}");
+                }
             }
         }
+    }      // Method to debug settings by showing all set properties
+    public void LogActiveSettings()
+    {
+        var logger = SaveVaultApp.Services.LoggingService.Instance;
+        logger.Debug("Active Settings Properties:");
+        
+        // Log basic properties
+        logger.Debug($"Theme: {Theme}");
+        logger.Debug($"SortOption: {SortOption}");
+        logger.Debug($"HiddenGamesExpanded: {HiddenGamesExpanded}");
+        logger.Debug($"GlobalAutoSaveEnabled: {GlobalAutoSaveEnabled}");
+        logger.Debug($"StartSaveEnabled: {StartSaveEnabled}");
+        logger.Debug($"AutoSaveInterval: {AutoSaveInterval}");
+        logger.Debug($"MaxAutoSaves: {MaxAutoSaves}");
+        logger.Debug($"MaxStartSaves: {MaxStartSaves}");
+        
+        // Log collections sizes
+        logger.Debug($"LastUsedTimes count: {LastUsedTimes?.Count ?? 0}");
+        logger.Debug($"LastBackupTimes count: {LastBackupTimes?.Count ?? 0}");
+        logger.Debug($"CustomNames count: {CustomNames?.Count ?? 0}");
+        logger.Debug($"HiddenApps count: {HiddenApps?.Count ?? 0}");
+        logger.Debug($"AppSettings count: {AppSettings?.Count ?? 0}");
+        logger.Debug($"BackupHistory count: {BackupHistory?.Count ?? 0}");
     }
-      // Debug method to verify paths
+    
+    // Debug method to verify paths
     public static void DebugEnvironmentPaths()
     {
         var logger = SaveVaultApp.Services.LoggingService.Instance;
@@ -291,6 +387,31 @@ public class Settings
                     fileList += $"{Path.GetFileName(file)}, ";
                 }
                 logger.Debug($"Files: {fileList.TrimEnd(',', ' ')}");
+                
+                // Check write permissions by creating a test file
+                try {
+                    string testPath = Path.Combine(saveVaultDir, $"test_{Guid.NewGuid():N}.txt");
+                    File.WriteAllText(testPath, "Test write permissions");
+                    logger.Debug($"✅ Successfully wrote test file: {testPath}");
+                    
+                    if (File.Exists(testPath)) {
+                        File.Delete(testPath);
+                        logger.Debug("✅ Successfully deleted test file");
+                    }
+                }
+                catch (Exception ex) {
+                    logger.Error($"❌ Directory permission test failed: {ex.Message}");
+                }
+            }
+            else {
+                logger.Warning("SaveVault directory does not exist in AppData");
+                try {
+                    Directory.CreateDirectory(saveVaultDir);
+                    logger.Debug($"Created SaveVault directory: {Directory.Exists(saveVaultDir)}");
+                }
+                catch (Exception ex) {
+                    logger.Error($"Failed to create SaveVault directory: {ex.Message}");
+                }
             }
         }
         catch (Exception ex)

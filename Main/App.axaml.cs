@@ -51,28 +51,72 @@ public partial class App : Application
                 logger.Error($"Error logging environment details: {ex.Message}");
             }            // Debug environment paths before loading settings
             Settings.DebugEnvironmentPaths();
-                        
-            // Ensure SaveVault directory exists
+                          // Ensure SaveVault directory exists
             string appDataRoamingPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
             string saveVaultDirectory = Path.Combine(appDataRoamingPath, "SaveVault");
 
             if (!Directory.Exists(saveVaultDirectory))
             {
                 logger.Debug($"SaveVault directory does not exist. Creating: {saveVaultDirectory}");
-                Directory.CreateDirectory(saveVaultDirectory);
-                logger.Debug($"SaveVault directory created: {Directory.Exists(saveVaultDirectory)}");
-            }
-              // Load and ensure settings are saved properly
+                try {
+                    Directory.CreateDirectory(saveVaultDirectory);
+                    logger.Debug($"SaveVault directory created: {Directory.Exists(saveVaultDirectory)}");
+                    
+                    // Test write permissions
+                    string testFile = Path.Combine(saveVaultDirectory, "directory_test.txt");
+                    File.WriteAllText(testFile, "Testing directory permissions");
+                    logger.Debug($"Successfully wrote test file: {testFile}");
+                    File.Delete(testFile);
+                    logger.Debug("Successfully deleted test file");
+                }
+                catch (Exception ex) {
+                    logger.Error($"Failed to create or test SaveVault directory: {ex.Message}");
+                    
+                    // Try local app data as fallback
+                    try {
+                        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                        string fallbackDir = Path.Combine(localAppData, "SaveVault");
+                        logger.Warning($"Attempting to use fallback location: {fallbackDir}");
+                        Directory.CreateDirectory(fallbackDir);
+                        
+                        // Set a static field to use this path instead
+                        Settings.UseAlternativeSettingsPath(Path.Combine(fallbackDir, "settings.json"));
+                    }
+                    catch (Exception fallbackEx) {
+                        logger.Critical($"Failed to create fallback directory: {fallbackEx.Message}");
+                    }
+                }
+            }              // Load and ensure settings are saved properly
             logger.Info("Loading settings");
             var settings = Settings.Load();
-            logger.Info("Force saving settings to ensure file creation");
-            settings.ForceSave();
-              // Check if the settings file was actually created after trying to save
-            string settingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "SaveVault",
-                "settings.json");
+              // Force save if the settings file doesn't exist
+            string settingsFilePath = Settings.GetSettingsPath();
+            
+            // Log what properties are set in the loaded settings
+            logger.Info("Logging active settings properties");
+            settings.LogActiveSettings();
+            
+            if (!File.Exists(settingsFilePath))
+            {
+                logger.Info("Settings file doesn't exist. Forcing save to create it.");
+                settings.ForceSave();
+            }
+            else
+            {
+                logger.Info($"Settings file already exists at: {settingsFilePath}");
                 
+                // Check file size and force a save if it's suspiciously small
+                var fileInfo = new FileInfo(settingsFilePath);
+                if (fileInfo.Length < 50) // Arbitrary small size to detect minimal JSON
+                {
+                    logger.Warning($"Settings file exists but is suspiciously small ({fileInfo.Length} bytes). Forcing save.");
+                    settings.ForceSave();
+                }
+            }// Check if the settings file was actually created after trying to save
+            // Use our public method to get the settings path
+            string settingsPath = Settings.GetSettingsPath();
+                
+            logger.Info($"Checking for settings file at: {settingsPath}");
             if (File.Exists(settingsPath))
             {
                 logger.Info($"✅ Settings file verified at: {settingsPath}");
@@ -82,10 +126,14 @@ public partial class App : Application
                     // Try to check if file is readable
                     string contents = File.ReadAllText(settingsPath);
                     logger.Info($"Settings file is readable, length: {contents.Length}");
+                    
+                    // Try to parse it as JSON to ensure it's valid
+                    var jsonDocument = System.Text.Json.JsonDocument.Parse(contents);
+                    logger.Info($"Settings file is valid JSON with {jsonDocument.RootElement.EnumerateObject().Count()} properties");
                 }
                 catch (Exception ex)
                 {
-                    logger.Error($"Settings file exists but can't be read: {ex.Message}");
+                    logger.Error($"Settings file exists but can't be read or parsed: {ex.Message}");
                 }
             }
             else

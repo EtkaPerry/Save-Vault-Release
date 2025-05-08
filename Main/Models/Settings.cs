@@ -3,6 +3,7 @@ using System.IO;
 using System.Text.Json;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 
 namespace SaveVaultApp.Models;
 
@@ -113,20 +114,25 @@ public class Settings
             {
                 Debug.WriteLine($"Creating settings directory during load: {directory}");
                 Directory.CreateDirectory(directory);
-            }            if (File.Exists(SettingsPath))
+            }
+            
+            if (File.Exists(SettingsPath))
             {
                 Debug.WriteLine($"Settings file exists at: {SettingsPath}");
                 var json = File.ReadAllText(SettingsPath);
-                  // Use the same options for deserialize as we do for serialize
+                Debug.WriteLine($"Loaded JSON length: {json.Length} bytes");
+                  
+                // Use the same options for deserialize as we do for serialize
                 var options = new JsonSerializerOptions { 
                     WriteIndented = true,
                     IncludeFields = true,
                     DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
                     ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles
                 };
-                var settings = JsonSerializer.Deserialize<Settings>(json, options) ?? new Settings();
                 
-                // Initialize collections if they're null to prevent null reference exceptions
+                var settings = JsonSerializer.Deserialize<Settings>(json, options) ?? new Settings();
+                Debug.WriteLine($"Settings deserialized successfully. Window size: {settings.WindowWidth}x{settings.WindowHeight}");
+                  // Initialize collections if they're null to prevent null reference exceptions
                 settings.LastUsedTimes ??= new();
                 settings.LastBackupTimes ??= new(); // Initialize LastBackupTimes
                 settings.CustomNames ??= new();
@@ -135,7 +141,52 @@ public class Settings
                 settings.KnownApplicationPaths ??= new();
                 settings.AppSettings ??= new();
                 settings.BackupHistory ??= new(); // Ensure BackupHistory is initialized
-
+                
+                // Ensure toggle properties are set properly
+                if (!json.Contains("\"GlobalAutoSaveEnabled\":"))
+                {
+                    Debug.WriteLine("GlobalAutoSaveEnabled not found in settings, restoring default (true)");
+                    settings.GlobalAutoSaveEnabled = true;
+                }
+                
+                if (!json.Contains("\"StartSaveEnabled\":"))
+                {
+                    Debug.WriteLine("StartSaveEnabled not found in settings, restoring default (true)");
+                    settings.StartSaveEnabled = true;
+                }
+                
+                if (!json.Contains("\"AutoCheckUpdates\":"))
+                {
+                    Debug.WriteLine("AutoCheckUpdates not found in settings, restoring default (true)");
+                    settings.AutoCheckUpdates = true;
+                }
+                
+                // Log toggle settings state
+                Debug.WriteLine($"Toggle settings loaded: " +
+                                $"GlobalAutoSaveEnabled={settings.GlobalAutoSaveEnabled}, " +
+                                $"StartSaveEnabled={settings.StartSaveEnabled}, " +
+                                $"AutoCheckUpdates={settings.AutoCheckUpdates}");
+                
+                // Fix any future dates in the settings
+                DateTime now = DateTime.Now;
+                foreach (var key in settings.LastUsedTimes.Keys.ToList())
+                {
+                    if (settings.LastUsedTimes[key] > now)
+                    {
+                        Debug.WriteLine($"Correcting future date in LastUsedTimes: {settings.LastUsedTimes[key]} to {now}");
+                        settings.LastUsedTimes[key] = now;
+                    }
+                }
+                
+                foreach (var key in settings.LastBackupTimes.Keys.ToList())
+                {
+                    if (settings.LastBackupTimes[key] > now)
+                    {
+                        Debug.WriteLine($"Correcting future date in LastBackupTimes: {settings.LastBackupTimes[key]} to {now}");
+                        settings.LastBackupTimes[key] = now;
+                    }
+                }
+                
                 _instance = settings;
                 return settings;
             }
@@ -183,8 +234,7 @@ public class Settings
                 Debug.WriteLine("Failed to log through LoggingService");
             }
         }
-    }
-      // Force save with retry logic
+    }    // Force save with retry logic
     public void ForceSave()
     {
         int maxRetries = 3;
@@ -194,6 +244,27 @@ public class Settings
         // Use logging service for better visibility in dotnet run
         var logger = SaveVaultApp.Services.LoggingService.Instance;
         logger.Debug($"ForceSave called for settings.json");
+        
+        // Correct any future dates that might be in the settings before saving
+        // This prevents invalid dates from being saved to settings.json
+        DateTime now = DateTime.Now;
+        foreach (var key in LastUsedTimes.Keys.ToList())
+        {
+            if (LastUsedTimes[key] > now)
+            {
+                logger.Warning($"Correcting future date in LastUsedTimes for {key}: {LastUsedTimes[key]} to {now}");
+                LastUsedTimes[key] = now;
+            }
+        }
+        
+        foreach (var key in LastBackupTimes.Keys.ToList())
+        {
+            if (LastBackupTimes[key] > now)
+            {
+                logger.Warning($"Correcting future date in LastBackupTimes for {key}: {LastBackupTimes[key]} to {now}");
+                LastBackupTimes[key] = now;
+            }
+        }
         
         while (!saved && retryCount < maxRetries)
         {
@@ -216,7 +287,9 @@ public class Settings
                 {
                     Directory.CreateDirectory(directory);
                     logger.Debug($"Created settings directory: {directory}");
-                }                logger.Debug("Serializing settings to JSON");
+                }
+                
+                logger.Debug("Serializing settings to JSON");
                 var options = new JsonSerializerOptions { 
                     WriteIndented = true,
                     IncludeFields = true,
@@ -226,13 +299,28 @@ public class Settings
                 var json = JsonSerializer.Serialize(this, options);
                 logger.Debug($"JSON serialization complete, length: {json.Length}");
                 
-                // Write directly to settings file first as a test
-                logger.Debug($"Testing direct write to settings file: {SettingsPath}");
+                // Make a backup of the current settings file before overwriting
+                if (File.Exists(SettingsPath))
+                {
+                    string backupPath = SettingsPath + ".bak";
+                    try
+                    {
+                        File.Copy(SettingsPath, backupPath, true);
+                        logger.Debug($"Created settings backup at: {backupPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Warning($"Failed to create settings backup: {ex.Message}");
+                    }
+                }
+                
+                // Write directly to settings file
+                logger.Debug($"Writing to settings file: {SettingsPath}");
                 File.WriteAllText(SettingsPath, json);
                 
                 if (File.Exists(SettingsPath))
                 {
-                    logger.Debug($"Settings file exists after direct write, size: {new FileInfo(SettingsPath).Length} bytes");
+                    logger.Debug($"Settings file exists after write, size: {new FileInfo(SettingsPath).Length} bytes");
                     saved = true;
                 }
                 else 

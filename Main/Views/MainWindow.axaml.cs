@@ -276,13 +276,18 @@ public partial class MainWindow : Window
             SaveSettingsWithDebounce();
         }
     }
-    
-    private void SaveSettingsWithDebounce()
+      private void SaveSettingsWithDebounce()
     {
         // Cancel existing timer
         _resizeDebounceTimer?.Dispose();
         
-        // Create new timer with 500ms delay
+        // Store current values immediately to avoid race conditions
+        double currentWidth = Width;
+        double currentHeight = Height;
+        double currentPosX = Position.X;
+        double currentPosY = Position.Y;
+        
+        // Create new timer with 300ms delay (reduced from 500ms)
         _resizeDebounceTimer = new System.Threading.Timer(_ => 
         {
             // Invoke on UI thread
@@ -293,12 +298,26 @@ public partial class MainWindow : Window
                     try
                     {
                         _isSavingWindowSize = true;
-                        System.Diagnostics.Debug.WriteLine($"Saving window size: {Width}x{Height}");
-                        _settings.WindowPositionX = Position.X;
-                        _settings.WindowPositionY = Position.Y;
-                        _settings.WindowWidth = Width;
-                        _settings.WindowHeight = Height;
-                        _settings.Save();
+                        
+                        // Log before saving
+                        System.Diagnostics.Debug.WriteLine($"Saving window size: {currentWidth}x{currentHeight} at position {currentPosX},{currentPosY}");
+                        LoggingService.Instance.Debug($"Saving window size: {currentWidth}x{currentHeight}");
+                        
+                        // Update settings with captured values
+                        _settings.WindowPositionX = currentPosX;
+                        _settings.WindowPositionY = currentPosY;
+                        _settings.WindowWidth = currentWidth;
+                        _settings.WindowHeight = currentHeight;
+                        
+                        // Save settings with force to ensure it works
+                        _settings.ForceSave();
+                        
+                        // Log after saving
+                        LoggingService.Instance.Debug($"Window size saved successfully: {_settings.WindowWidth}x{_settings.WindowHeight}");
+                    }
+                    catch (Exception ex)
+                    {
+                        LoggingService.Instance.Error($"Failed to save window size: {ex.Message}");
                     }
                     finally
                     {
@@ -306,7 +325,7 @@ public partial class MainWindow : Window
                     }
                 }
             });
-        }, null, 500, System.Threading.Timeout.Infinite);
+        }, null, 300, System.Threading.Timeout.Infinite);
     }
     
     private void MinimizeButton_Click(object? sender, RoutedEventArgs e)

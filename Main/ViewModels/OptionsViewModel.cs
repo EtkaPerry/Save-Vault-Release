@@ -203,18 +203,16 @@ public partial class OptionsViewModel : ViewModelBase
         UpdateStatus = updateService.StatusMessage;
         
         // Apply the current theme on startup
-        ApplyTheme(_selectedTheme);
-    }// Helper method to save settings and notify about changes
+        ApplyTheme(_selectedTheme);    }
+    
+    // Helper method to save settings and notify about changes
     private void SaveChanges()
     {
         // Save settings to disk
-        _settings.Save();
+        _settings.ForceSave();
         
         // Call the callback to update the main view model
         _onSettingsChanged?.Invoke();
-        
-        // Debug logging
-        Debug.WriteLine($"Settings saved: Theme={_settings.Theme}, AutoSaveInterval={_settings.AutoSaveInterval}, GlobalAutoSaveEnabled={_settings.GlobalAutoSaveEnabled}");
     }
     
     private void ApplyTheme(string themeName)
@@ -354,14 +352,22 @@ public partial class OptionsViewModel : ViewModelBase
     }
     
     // Update-related properties
-    private bool _autoCheckUpdates;
-    public bool AutoCheckUpdates
+    private bool _autoCheckUpdates;    public bool AutoCheckUpdates
     {
         get => _autoCheckUpdates;
         set
         {
             this.RaiseAndSetIfChanged(ref _autoCheckUpdates, value);
             _settings.AutoCheckUpdates = value;
+            
+            // Log the toggle state change
+            var logger = SaveVaultApp.Services.LoggingService.Instance;
+            logger.Debug($"AutoCheckUpdates changed to: {value}");
+            
+            // Use ForceSave to ensure it really saves
+            _settings.ForceSave();
+            
+            // Then continue with normal SaveChanges
             SaveChanges();
         }
     }

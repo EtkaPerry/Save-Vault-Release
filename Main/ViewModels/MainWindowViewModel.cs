@@ -555,16 +555,24 @@ public partial class MainWindowViewModel : ViewModelBase
             filesCopied++;
         }
     }
-    
-    private string SanitizePathName(string name)
+      private string SanitizePathName(string name)
     {
+        if (string.IsNullOrEmpty(name))
+            return "Unknown";
+            
         // Remove invalid characters from path
         string invalidChars = new string(Path.GetInvalidFileNameChars());
         string sanitized = string.Join("_", name.Split(invalidChars.ToCharArray(), 
             StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
 
         // Replace spaces with underscores
-        return sanitized.Replace(' ', '_');
+        sanitized = sanitized.Replace(' ', '_');
+        
+        // Make sure we have something valid
+        if (string.IsNullOrEmpty(sanitized))
+            return "Unknown";
+            
+        return sanitized;
     }
 
     private string _searchText = string.Empty;
@@ -1050,14 +1058,20 @@ public partial class MainWindowViewModel : ViewModelBase
                     if (app.BackupHistory.Count > 0)
                         app.LastBackupTime = app.BackupHistory.Max(b => b.Timestamp);
                 }
-                
-                // Apply customizations from AppData (with fallbacks to older locations)
+                  // Apply customizations from AppData (with fallbacks to older locations)
+                string originalName = app.Name; // Remember original name before customization
                 if (_appData.CustomNames != null && _appData.CustomNames.TryGetValue(exePath, out string? appListCustomName) && !string.IsNullOrWhiteSpace(appListCustomName))
                     app.Name = appListCustomName;
                 else if (_appData.CustomNames != null && _appData.CustomNames.TryGetValue(exePath, out string? appDataCustomName) && !string.IsNullOrWhiteSpace(appDataCustomName))
                     app.Name = appDataCustomName;
                 else if (_settings.CustomNames != null && _settings.CustomNames.TryGetValue(exePath, out string? settingsCustomName) && !string.IsNullOrWhiteSpace(settingsCustomName))
                     app.Name = settingsCustomName;
+                
+                // Ensure backup paths match the current name if needed
+                if (originalName != app.Name)
+                {
+                    EnsureBackupPathsMatchAppName(app, originalName);
+                }
                     
                 if (_appData.CustomSavePaths != null && _appData.CustomSavePaths.TryGetValue(exePath, out string? appListCustomSavePath) && !string.IsNullOrWhiteSpace(appListCustomSavePath))
                     app.SavePath = appListCustomSavePath;
@@ -1943,9 +1957,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
         EditableSavePath = SelectedApp.SavePath;
         IsEditingSavePath = true;
-    }
-
-    public void SaveAppName()
+    }    public void SaveAppName()
     {
         if (SelectedApp == null || !IsEditingName || string.IsNullOrWhiteSpace(EditableName))
         {
@@ -1968,6 +1980,9 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             appInList.Name = newName;
         }
+        
+        // Handle existing backup paths if there are any
+        UpdateBackupFoldersAfterNameChange(executablePath, oldName, newName);
         
         // Save custom name to AppData
         _appData.CustomNames[executablePath] = newName;
@@ -2100,8 +2115,7 @@ public partial class MainWindowViewModel : ViewModelBase
             Debug.WriteLine($"Error selecting folder: {ex.Message}");
         }
     }
-    
-    public void SaveAll()
+      public void SaveAll()
     {
         if (SelectedApp == null || !IsEditing)
             return;
@@ -2125,6 +2139,9 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 appInList.Name = newName;
             }
+            
+            // Handle existing backup paths if there are any
+            UpdateBackupFoldersAfterNameChange(executablePath, oldName, newName);
             
             // Save custom name to AppData
             _appData.CustomNames[executablePath] = newName;
@@ -3425,6 +3442,163 @@ public partial class MainWindowViewModel : ViewModelBase
     public void ToggleHiddenGamesVisibility()
     {
         IsHiddenGamesExpanded = !IsHiddenGamesExpanded;
+    }
+    
+    /// <summary>
+    /// Updates backup folder references after the app's name changes
+    /// </summary>
+    /// <param name="executablePath">The app's executable path (used as key in settings)</param>
+    /// <param name="oldName">The previous name of the app</param>
+    /// <param name="newName">The new name of the app</param>
+    private void UpdateBackupFoldersAfterNameChange(string executablePath, string oldName, string newName)
+    {
+        try
+        {
+            // Skip if there's no backup history for this app
+            if (!_settings.BackupHistory.TryGetValue(executablePath, out var backupList) || backupList.Count == 0)
+                return;
+                
+            string oldSanitizedName = SanitizePathName(oldName);
+            string newSanitizedName = SanitizePathName(newName);
+            
+            // Get the app instance from the all installed apps list
+            var app = AllInstalledApps.FirstOrDefault(a => 
+                string.Equals(a.ExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase));
+                
+            if (app == null)
+                return;
+                
+            // Check if we need to handle physical folder renaming
+            bool oldFolderExists = Directory.Exists(Path.Combine(_backupRootFolder, oldSanitizedName));
+            bool newFolderExists = Directory.Exists(Path.Combine(_backupRootFolder, newSanitizedName));
+            
+            // Option 1: Physically move the folder (if it exists and target doesn't)
+            if (oldFolderExists && !newFolderExists)
+            {
+                try
+                {
+                    // Attempt to move the physical directory
+                    Directory.Move(
+                        Path.Combine(_backupRootFolder, oldSanitizedName), 
+                        Path.Combine(_backupRootFolder, newSanitizedName));
+                    
+                    // Update the paths in backup history
+                    foreach (var backup in backupList)
+                    {
+                        backup.BackupPath = backup.BackupPath.Replace(
+                            Path.Combine(_backupRootFolder, oldSanitizedName),
+                            Path.Combine(_backupRootFolder, newSanitizedName));
+                    }
+                    
+                    // Update paths in the UI collection too
+                    foreach (var backup in app.BackupHistory)
+                    {
+                        backup.BackupPath = backup.BackupPath.Replace(
+                            Path.Combine(_backupRootFolder, oldSanitizedName),
+                            Path.Combine(_backupRootFolder, newSanitizedName));
+                    }
+                    
+                    // Save the updated paths to settings
+                    _settings.Save();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Failed to rename backup folder: {ex.Message}");
+                    // Continue with the next approach if moving fails
+                }
+            }
+            
+            // Option 2: If physical move didn't happen or failed, update the UI to recognize old paths
+            if (!Directory.Exists(Path.Combine(_backupRootFolder, newSanitizedName)))
+            {
+                // Just make sure the UI shows correct backups
+                app.BackupHistory.Clear();
+                foreach (var backup in backupList.OrderByDescending(b => b.Timestamp))
+                {
+                    app.BackupHistory.Add(new SaveBackupInfo
+                    {
+                        BackupPath = backup.BackupPath,
+                        Timestamp = backup.Timestamp,
+                        Description = backup.Description,
+                        IsAutoBackup = backup.IsAutoBackup
+                    });
+                }
+                
+                if (app.BackupHistory.Count > 0)
+                {
+                    app.LastBackupTime = app.BackupHistory.Max(b => b.Timestamp);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error updating backup folders after name change: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Ensures backup paths match the current app name when loading an app
+    /// </summary>
+    private void EnsureBackupPathsMatchAppName(ApplicationInfo app, string originalName)
+    {
+        try
+        {
+            // Skip if there's no backup history for this app or names are the same
+            if (!_settings.BackupHistory.TryGetValue(app.ExecutablePath, out var backupList) || 
+                backupList.Count == 0 || 
+                originalName == app.Name)
+                return;
+                
+            string originalSanitizedName = SanitizePathName(originalName);
+            string currentSanitizedName = SanitizePathName(app.Name);
+            
+            // Skip if sanitized names are identical (would result in same paths)
+            if (originalSanitizedName == currentSanitizedName)
+                return;
+                
+            // Check if we need to handle physical folder renaming
+            bool originalFolderExists = Directory.Exists(Path.Combine(_backupRootFolder, originalSanitizedName));
+            bool currentFolderExists = Directory.Exists(Path.Combine(_backupRootFolder, currentSanitizedName));
+            
+            // Option 1: If original folder exists but current doesn't, move it
+            if (originalFolderExists && !currentFolderExists)
+            {
+                try
+                {
+                    // Attempt to move the physical directory
+                    Directory.Move(
+                        Path.Combine(_backupRootFolder, originalSanitizedName), 
+                        Path.Combine(_backupRootFolder, currentSanitizedName));
+                    
+                    // Update the paths in backup history
+                    foreach (var backup in backupList)
+                    {
+                        backup.BackupPath = backup.BackupPath.Replace(
+                            Path.Combine(_backupRootFolder, originalSanitizedName),
+                            Path.Combine(_backupRootFolder, currentSanitizedName));
+                    }
+                    
+                    // Update paths in the UI collection too
+                    foreach (var backup in app.BackupHistory)
+                    {
+                        backup.BackupPath = backup.BackupPath.Replace(
+                            Path.Combine(_backupRootFolder, originalSanitizedName),
+                            Path.Combine(_backupRootFolder, currentSanitizedName));
+                    }
+                    
+                    // Save the updated paths to settings
+                    _settings.Save();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Failed to rename backup folder during loading: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error ensuring backup paths match app name: {ex.Message}");
+        }
     }
 }
  

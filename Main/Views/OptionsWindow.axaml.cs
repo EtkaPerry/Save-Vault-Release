@@ -385,7 +385,7 @@ public partial class OptionsWindow : Window
             settings.OptionsWindowHeight = Height;
             settings.OptionsWindowPositionX = Position.X;
             settings.OptionsWindowPositionY = Position.Y;
-            settings.Save();
+            settings.ForceSave(); // Use ForceSave for reliability
         }
     }
 }

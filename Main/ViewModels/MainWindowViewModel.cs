@@ -745,7 +745,7 @@ public partial class MainWindowViewModel : ViewModelBase
             // Update LastUsed time and persist it
             SelectedApp.LastUsed = DateTime.Now;
             _settings.LastUsedTimes[SelectedApp.ExecutablePath] = SelectedApp.LastUsed;
-            _settings.Save();
+            _settings.ForceSave();
             
             // If sorted by last used, refresh the sort
             if (SelectedSortOption == "Last Used")
@@ -1853,7 +1853,7 @@ public partial class MainWindowViewModel : ViewModelBase
         _settings.KnownApplicationPaths.Clear();
         _settings.BackupHistory.Clear(); // Clear backup history
         _settings.AppSettings.Clear(); // Clear app-specific settings
-        _settings.Save();
+        _settings.ForceSave();
         
         // Clear all saved data in AppData
         _appData.LastBackupTimes.Clear();

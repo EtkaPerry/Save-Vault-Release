@@ -236,6 +236,8 @@ public partial class MainWindow : Window
         {
             e.Cancel = true; // Cancel the close
             Hide(); // Hide the window instead
+            // Save settings when hiding to tray as an extra checkpoint
+            _settings.ForceSave();
         }
         else
         {
@@ -245,6 +247,8 @@ public partial class MainWindow : Window
                 _trayIcon.Dispose();
                 _trayIcon = null;
             }
+            // Save settings on real exit
+            _settings.ForceSave();
         }
     }    // Timer to debounce window resize events
     private System.Threading.Timer? _resizeDebounceTimer;
@@ -344,6 +348,8 @@ public partial class MainWindow : Window
     {
         // Minimize to tray instead of closing
         Hide();
+        // Save settings when minimizing to tray as an extra checkpoint
+        _settings.ForceSave();
     }
     
     private void DragRegion_PointerPressed(object? sender, PointerPressedEventArgs e)

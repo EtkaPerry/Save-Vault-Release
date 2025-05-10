@@ -592,26 +592,32 @@ public partial class MainWindowViewModel : ViewModelBase
         SearchText = string.Empty;
     }
 
-    private string _selectedSortOption = "A-Z";
+    private string _selectedSortOption = "Last Used";
     public string SelectedSortOption
     {
         get => _selectedSortOption;
         set
         {
-            this.RaiseAndSetIfChanged(ref _selectedSortOption, value);
-            _settings.SortOption = value;
-            _settings.Save();
-            ApplySort();
+            if (_selectedSortOption != value)
+            {
+                this.RaiseAndSetIfChanged(ref _selectedSortOption, value);
+                _settings.SortOption = value;
+                _settings.ForceSave(); // Force immediate save
+                ApplySort();
+                Debug.WriteLine($"Sort option changed to {value} and saved.");
+            }
         }
     }
 
+    // This command is called from the UI
     [RelayCommand]
     private void SetSortOption(string sortOption)
     {
         if (sortOption != null && sortOption != SelectedSortOption)
         {
             SelectedSortOption = sortOption;
-            // SelectedSortOption property setter already handles saving to settings and applying the sort
+            // Log to verify it was set
+            Debug.WriteLine($"SetSortOption command executed with value: {sortOption}");
         }
     }
 

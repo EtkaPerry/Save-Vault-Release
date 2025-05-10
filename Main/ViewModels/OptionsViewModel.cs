@@ -168,51 +168,61 @@ public partial class OptionsViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _isCalculatingStorage, value);
     }    public OptionsViewModel(Settings settings, Action onSettingsChanged)
     {
-        // Ensure we're using the static instance when available
+        // Force Settings.Instance to be initialized and ensure we're using the singleton
         _settings = Settings.Instance ?? settings;
+        if (_settings != Settings.Instance)
+        {
+            Debug.WriteLine("WARNING: OptionsViewModel not using Settings.Instance!");
+            // Try to update the instance
+            if (Settings.Instance == null)
+            {
+                Settings.Load();
+            }
+        }
+        
         _onSettingsChanged = onSettingsChanged;
 
-        // Log what settings we're using
-        Debug.WriteLine($"OptionsViewModel initialized with settings. AutoSaveInterval={_settings.AutoSaveInterval}, GlobalAutoSaveEnabled={_settings.GlobalAutoSaveEnabled}");        // Load current settings
+        // Load current settings from the instance
         _autoSaveInterval = _settings.AutoSaveInterval;
         _globalAutoSaveEnabled = _settings.GlobalAutoSaveEnabled;
         _startSaveEnabled = _settings.StartSaveEnabled;
         _maxAutoSaves = _settings.MaxAutoSaves;
         _maxStartSaves = _settings.MaxStartSaves;
-        _selectedTheme = _settings.Theme ?? "System"; // Default to System if not set
+        _selectedTheme = _settings.Theme ?? "System";
         _backupStorageLocation = _settings.BackupStorageLocation;
         
         // Load update settings
         _autoCheckUpdates = _settings.AutoCheckUpdates;
         _updateCheckInterval = _settings.UpdateCheckInterval;
+
+        Debug.WriteLine($"OptionsViewModel initialized with settings. AutoSaveInterval={_autoSaveInterval}, GlobalAutoSaveEnabled={_globalAutoSaveEnabled}");
         
         // Set up update service events
         var updateService = UpdateService.Instance;
-        updateService.UpdateStatusChanged += (s, status) => {
-            UpdateStatus = status;
-        };
-        updateService.UpdateAvailabilityChanged += (s, available) => {
-            UpdateAvailable = available;
-        };
-        updateService.DownloadProgressChanged += (s, progress) => {
-            // Update progress is handled elsewhere
-        };
+        updateService.UpdateStatusChanged += (s, status) => UpdateStatus = status;
+        updateService.UpdateAvailabilityChanged += (s, available) => UpdateAvailable = available;
         
         // Update status from service
         UpdateAvailable = updateService.UpdateAvailable;
         UpdateStatus = updateService.StatusMessage;
         
-        // Apply the current theme on startup
-        ApplyTheme(_selectedTheme);    }
-    
-    // Helper method to save settings and notify about changes
+        // Force a save of current settings to ensure they're persisted
+        SaveChanges();
+        
+        // Apply the current theme
+        ApplyTheme(_selectedTheme);    }      // Helper method to save settings and notify about changes
     private void SaveChanges()
     {
-        // Save settings to disk
+        // Log current settings before saving
+        Debug.WriteLine($"SaveChanges - Current settings: AutoSaveInterval={_settings.AutoSaveInterval}, GlobalAutoSaveEnabled={_settings.GlobalAutoSaveEnabled}");
+
+        // Force an immediate save of settings to disk
         _settings.ForceSave();
-        
-        // Call the callback to update the main view model
+        Debug.WriteLine("Settings saved with ForceSave()");
+
+        // Update the main view model with the new settings
         _onSettingsChanged?.Invoke();
+        Debug.WriteLine("MainViewModel updated via callback");
     }
     
     private void ApplyTheme(string themeName)

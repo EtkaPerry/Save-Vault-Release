@@ -18,16 +18,40 @@ public class SaveBackupInfo
 
 public class Settings
 {
-    // Add static instance
+    // Static instance handling
     private static Settings? _instance;
-    public static Settings? Instance => _instance;    
-      private static string _settingsPath = Path.Combine(
+    public static Settings Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                _instance = Load();
+                Debug.WriteLine("Created new Settings instance via Instance property");
+            }
+            return _instance;
+        }
+        private set => _instance = value;
+    }
+
+    // Static constructor to ensure initialization
+    static Settings()
+    {
+        if (_instance == null)
+        {
+            _instance = Load();
+            Debug.WriteLine("Static constructor: Settings instance initialized");
+        }
+    }
+
+    // Changed to use property to ensure initialization
+    private static string _settingsPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "SaveVault",
-        "settings.json" // Make sure this is lowercase to match other files
+        "settings.json"
     );
-    
-    // Changed to use the _settingsPath field instead of a readonly string
+
+    // Changed to use the _settingsPath field
     private static string SettingsPath => _settingsPath;
     
     // Method to use alternative settings path
@@ -43,68 +67,410 @@ public class Settings
     }
     
     // User authentication settings
-    public string? LoggedInUser { get; set; }
-    public string? AuthToken { get; set; }
+    private string? _loggedInUser;
+    public string? LoggedInUser
+    {
+        get => _loggedInUser;
+        set
+        {
+            _loggedInUser = value;
+            QueueSave();
+        }
+    }
 
-    public string SortOption { get; set; } = "A-Z";
-    public bool HiddenGamesExpanded { get; set; } = true;
+    private string? _authToken;
+    public string? AuthToken
+    {
+        get => _authToken;
+        set
+        {
+            _authToken = value;
+            QueueSave();
+        }
+    }
+
+    private string _sortOption = "Last Used";
+    public string SortOption
+    {
+        get => _sortOption;
+        set
+        {
+            _sortOption = value;
+            QueueSave();
+        }
+    }
+
+    private bool _hiddenGamesExpanded = true;
+    public bool HiddenGamesExpanded
+    {
+        get => _hiddenGamesExpanded;
+        set
+        {
+            _hiddenGamesExpanded = value;
+            QueueSave();
+        }
+    }
     
     // Theme setting
-    public string? Theme { get; set; } = "System";
+    private string? _theme = "System";
+    public string? Theme
+    {
+        get => _theme;
+        set
+        {
+            _theme = value;
+            QueueSave();
+        }
+    }
     
     // Auto-save settings
-    public int AutoSaveInterval { get; set; } = 15;
-    public bool GlobalAutoSaveEnabled { get; set; } = true;
-    public bool StartSaveEnabled { get; set; } = true;
-    public int MaxAutoSaves { get; set; } = 5; // Maximum number of auto-saves to keep
-    public int MaxStartSaves { get; set; } = 3; // Maximum number of start saves to keep
-      // Backup storage location
-    public string BackupStorageLocation { get; set; } = Path.Combine(
+    private int _autoSaveInterval = 15;
+    public int AutoSaveInterval
+    {
+        get => _autoSaveInterval;
+        set
+        {
+            _autoSaveInterval = value;
+            QueueSave();
+        }
+    }
+
+    private bool _globalAutoSaveEnabled = false;
+    public bool GlobalAutoSaveEnabled
+    {
+        get => _globalAutoSaveEnabled;
+        set
+        {
+            _globalAutoSaveEnabled = value;
+            QueueSave();
+        }
+    }
+
+    private bool _startSaveEnabled = true;
+    public bool StartSaveEnabled
+    {
+        get => _startSaveEnabled;
+        set
+        {
+            _startSaveEnabled = value;
+            QueueSave();
+        }
+    }
+
+    private int _maxAutoSaves = 3;
+    public int MaxAutoSaves
+    {
+        get => _maxAutoSaves;
+        set
+        {
+            _maxAutoSaves = value;
+            QueueSave();
+        }
+    }
+
+    private int _maxStartSaves = 2;
+    public int MaxStartSaves
+    {
+        get => _maxStartSaves;
+        set
+        {
+            _maxStartSaves = value;
+            QueueSave();
+        }
+    }
+
+    // Backup storage location
+    private string _backupStorageLocation = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "SaveVault", "Backups");
+    public string BackupStorageLocation
+    {
+        get => _backupStorageLocation;
+        set
+        {
+            _backupStorageLocation = value;
+            QueueSave();
+        }
+    }
         
     // Update settings
-    public bool AutoCheckUpdates { get; set; } = true;
-    public DateTime LastUpdateCheck { get; set; } = DateTime.MinValue;
-    public int UpdateCheckInterval { get; set; } = 24; // hours
+    private bool _autoCheckUpdates = true;
+    public bool AutoCheckUpdates
+    {
+        get => _autoCheckUpdates;
+        set
+        {
+            _autoCheckUpdates = value;
+            QueueSave();
+        }
+    }
+
+    private DateTime _lastUpdateCheck = DateTime.MinValue;
+    public DateTime LastUpdateCheck
+    {
+        get => _lastUpdateCheck;
+        set
+        {
+            _lastUpdateCheck = value;
+            QueueSave();
+        }
+    }
+
+    private int _updateCheckInterval = 24;
+    public int UpdateCheckInterval
+    {
+        get => _updateCheckInterval;
+        set
+        {
+            _updateCheckInterval = value;
+            QueueSave();
+        }
+    }
     
     // Window settings
-    public double WindowWidth { get; set; } = 800;
-    public double WindowHeight { get; set; } = 450;
-    public double WindowPositionX { get; set; } = double.NaN;
-    public double WindowPositionY { get; set; } = double.NaN;
-    public bool IsMaximized { get; set; } = false;
+    private double _windowWidth = 1200;
+    public double WindowWidth
+    {
+        get => _windowWidth;
+        set
+        {
+            _windowWidth = value;
+            QueueSave();
+        }
+    }
+
+    private double _windowHeight = 800;
+    public double WindowHeight
+    {
+        get => _windowHeight;
+        set
+        {
+            _windowHeight = value;
+            QueueSave();
+        }
+    }
+
+    private double _windowPositionX = double.NaN;
+    public double WindowPositionX
+    {
+        get => _windowPositionX;
+        set
+        {
+            _windowPositionX = value;
+            QueueSave();
+        }
+    }
+
+    private double _windowPositionY = double.NaN;
+    public double WindowPositionY
+    {
+        get => _windowPositionY;
+        set
+        {
+            _windowPositionY = value;
+            QueueSave();
+        }
+    }
+
+    private bool _isMaximized = false;
+    public bool IsMaximized
+    {
+        get => _isMaximized;
+        set
+        {
+            _isMaximized = value;
+            QueueSave();
+        }
+    }
 
     // Options Window settings
-    public double OptionsWindowWidth { get; set; } = 600;
-    public double OptionsWindowHeight { get; set; } = 400;
-    public double OptionsWindowPositionX { get; set; } = double.NaN;
-    public double OptionsWindowPositionY { get; set; } = double.NaN;
-    public bool IsOptionsMaximized { get; set; } = false;
+    private double _optionsWindowWidth = 750;
+    public double OptionsWindowWidth
+    {
+        get => _optionsWindowWidth;
+        set
+        {
+            _optionsWindowWidth = value;
+            QueueSave();
+        }
+    }
+
+    private double _optionsWindowHeight = 500;
+    public double OptionsWindowHeight
+    {
+        get => _optionsWindowHeight;
+        set
+        {
+            _optionsWindowHeight = value;
+            QueueSave();
+        }
+    }
+
+    private double _optionsWindowPositionX = double.NaN;
+    public double OptionsWindowPositionX
+    {
+        get => _optionsWindowPositionX;
+        set
+        {
+            _optionsWindowPositionX = value;
+            QueueSave();
+        }
+    }
+
+    private double _optionsWindowPositionY = double.NaN;
+    public double OptionsWindowPositionY
+    {
+        get => _optionsWindowPositionY;
+        set
+        {
+            _optionsWindowPositionY = value;
+            QueueSave();
+        }
+    }
+
+    private bool _isOptionsMaximized = false;
+    public bool IsOptionsMaximized
+    {
+        get => _isOptionsMaximized;
+        set
+        {
+            _isOptionsMaximized = value;
+            QueueSave();
+        }
+    }
 
     // Application specific settings
-    public Dictionary<string, DateTime> LastUsedTimes { get; set; } = new();
-    public Dictionary<string, DateTime> LastBackupTimes { get; set; } = new(); // Added to track last backup time
-    public Dictionary<string, string> CustomNames { get; set; } = new();
-    public Dictionary<string, string> CustomSavePaths { get; set; } = new();
-    public HashSet<string> HiddenApps { get; set; } = new();
-    public HashSet<string> KnownApplicationPaths { get; set; } = new();
-    public Dictionary<string, AppSpecificSettings> AppSettings { get; set; } = new();
+    // For collections, we'll need special handling since they can be modified directly
+    private Dictionary<string, DateTime> _lastUsedTimes = new();
+    public Dictionary<string, DateTime> LastUsedTimes
+    {
+        get => _lastUsedTimes;
+        set
+        {
+            _lastUsedTimes = value;
+            QueueSave();
+        }
+    }
 
-    // Add backup history storage
-    public Dictionary<string, List<SaveBackupInfo>> BackupHistory { get; set; } = new();
-    
-    // Constructor that ensures this instance is the current static instance
+    private Dictionary<string, DateTime> _lastBackupTimes = new();
+    public Dictionary<string, DateTime> LastBackupTimes
+    {
+        get => _lastBackupTimes;
+        set
+        {
+            _lastBackupTimes = value;
+            QueueSave();
+        }
+    }
+
+    private Dictionary<string, string> _customNames = new();
+    public Dictionary<string, string> CustomNames
+    {
+        get => _customNames;
+        set
+        {
+            _customNames = value;
+            QueueSave();
+        }
+    }
+
+    private Dictionary<string, string> _customSavePaths = new();
+    public Dictionary<string, string> CustomSavePaths
+    {
+        get => _customSavePaths;
+        set
+        {
+            _customSavePaths = value;
+            QueueSave();
+        }
+    }
+
+    private HashSet<string> _hiddenApps = new();
+    public HashSet<string> HiddenApps
+    {
+        get => _hiddenApps;
+        set
+        {
+            _hiddenApps = value;
+            QueueSave();
+        }
+    }
+
+    private HashSet<string> _knownApplicationPaths = new();
+    public HashSet<string> KnownApplicationPaths
+    {
+        get => _knownApplicationPaths;
+        set
+        {
+            _knownApplicationPaths = value;
+            QueueSave();
+        }
+    }
+
+    private Dictionary<string, AppSpecificSettings> _appSettings = new();
+    public Dictionary<string, AppSpecificSettings> AppSettings
+    {
+        get => _appSettings;
+        set
+        {
+            _appSettings = value;
+            QueueSave();
+        }
+    }
+
+    // Backup history storage
+    private Dictionary<string, List<SaveBackupInfo>> _backupHistory = new();
+    public Dictionary<string, List<SaveBackupInfo>> BackupHistory
+    {
+        get => _backupHistory;
+        set
+        {
+            _backupHistory = value;
+            QueueSave();
+        }
+    }    // Constructor that ensures this instance is the current static instance
     public Settings()
     {
         // Set this instance as the current static instance
         // This ensures that any instance creation updates the static reference
         _instance = this;
-    }    public static Settings Load()
-    {
-        // Call debug method to verify paths
-        DebugEnvironmentPaths();
         
+        // Initialize the save timer - checks every 2 seconds if there are pending saves
+        _saveTimer = new System.Threading.Timer(_ => 
+        {
+            if (_hasUnsavedChanges && DateTime.Now - _lastSaveTime >= _saveThrottleInterval)
+            {
+                try
+                {
+                    Save();
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error in save timer: {ex.Message}");
+                }
+            }
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        
+        // Register single app exit handler to ensure settings are saved
+        // Only register this once to avoid multiple handlers
+        if (_instance == null)
+        {
+            AppDomain.CurrentDomain.ProcessExit += (sender, e) => {
+                Debug.WriteLine("Application exiting, saving settings...");
+                ForceSave();
+            };
+        }
+    }
+
+    public static Settings Load()
+    {
+        // If we already have a valid instance, use it
+        if (_instance != null)
+        {
+            Debug.WriteLine("Load(): Returning existing Settings instance");
+            return _instance;
+        }
+
         try
         {
             var directory = Path.GetDirectoryName(SettingsPath);
@@ -116,310 +482,268 @@ public class Settings
                 Directory.CreateDirectory(directory);
             }
             
+            Settings settings;
+            
             if (File.Exists(SettingsPath))
             {
                 Debug.WriteLine($"Settings file exists at: {SettingsPath}");
                 var json = File.ReadAllText(SettingsPath);
-                Debug.WriteLine($"Loaded JSON length: {json.Length} bytes");
-                  
-                // Use the same options for deserialize as we do for serialize
-                var options = new JsonSerializerOptions { 
+
+                var options = new JsonSerializerOptions 
+                { 
                     WriteIndented = true,
                     IncludeFields = true,
                     DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-                    ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles
+                    ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles,
+                    NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
                 };
-                
-                var settings = JsonSerializer.Deserialize<Settings>(json, options) ?? new Settings();
-                Debug.WriteLine($"Settings deserialized successfully. Window size: {settings.WindowWidth}x{settings.WindowHeight}");
-                  // Initialize collections if they're null to prevent null reference exceptions
-                settings.LastUsedTimes ??= new();
-                settings.LastBackupTimes ??= new(); // Initialize LastBackupTimes
-                settings.CustomNames ??= new();
-                settings.CustomSavePaths ??= new();
-                settings.HiddenApps ??= new();
-                settings.KnownApplicationPaths ??= new();
-                settings.AppSettings ??= new();
-                settings.BackupHistory ??= new(); // Ensure BackupHistory is initialized
-                
-                // Ensure toggle properties are set properly
-                if (!json.Contains("\"GlobalAutoSaveEnabled\":"))
-                {
-                    Debug.WriteLine("GlobalAutoSaveEnabled not found in settings, restoring default (true)");
-                    settings.GlobalAutoSaveEnabled = true;
-                }
-                
-                if (!json.Contains("\"StartSaveEnabled\":"))
-                {
-                    Debug.WriteLine("StartSaveEnabled not found in settings, restoring default (true)");
-                    settings.StartSaveEnabled = true;
-                }
-                
-                if (!json.Contains("\"AutoCheckUpdates\":"))
-                {
-                    Debug.WriteLine("AutoCheckUpdates not found in settings, restoring default (true)");
-                    settings.AutoCheckUpdates = true;
-                }
-                
-                // Log toggle settings state
-                Debug.WriteLine($"Toggle settings loaded: " +
-                                $"GlobalAutoSaveEnabled={settings.GlobalAutoSaveEnabled}, " +
-                                $"StartSaveEnabled={settings.StartSaveEnabled}, " +
-                                $"AutoCheckUpdates={settings.AutoCheckUpdates}");
-                
-                // Fix any future dates in the settings
-                DateTime now = DateTime.Now;
-                foreach (var key in settings.LastUsedTimes.Keys.ToList())
-                {
-                    if (settings.LastUsedTimes[key] > now)
-                    {
-                        Debug.WriteLine($"Correcting future date in LastUsedTimes: {settings.LastUsedTimes[key]} to {now}");
-                        settings.LastUsedTimes[key] = now;
-                    }
-                }
-                
-                foreach (var key in settings.LastBackupTimes.Keys.ToList())
-                {
-                    if (settings.LastBackupTimes[key] > now)
-                    {
-                        Debug.WriteLine($"Correcting future date in LastBackupTimes: {settings.LastBackupTimes[key]} to {now}");
-                        settings.LastBackupTimes[key] = now;
-                    }
-                }
-                
-                _instance = settings;
-                return settings;
+
+                settings = JsonSerializer.Deserialize<Settings>(json, options) ?? new Settings();
             }
+            else
+            {
+                Debug.WriteLine("No settings file found, creating new settings");
+                settings = new Settings();
+            }
+
+            // Ensure all collections are initialized
+            settings.LastUsedTimes ??= new();
+            settings.LastBackupTimes ??= new();
+            settings.CustomNames ??= new();
+            settings.CustomSavePaths ??= new();
+            settings.HiddenApps ??= new();
+            settings.KnownApplicationPaths ??= new();
+            settings.AppSettings ??= new();
+            settings.BackupHistory ??= new();
+
+            // Set default values for any unset properties
+            if (string.IsNullOrEmpty(settings.SortOption))
+                settings.SortOption = "Last Used";
+            
+            if (string.IsNullOrEmpty(settings.Theme))
+                settings.Theme = "System";
+            
+            if (settings.AutoSaveInterval <= 0)
+                settings.AutoSaveInterval = 15;
+            
+            if (settings.MaxAutoSaves <= 0)
+                settings.MaxAutoSaves = 3;
+            
+            if (settings.MaxStartSaves <= 0)
+                settings.MaxStartSaves = 2;
+            
+            if (string.IsNullOrEmpty(settings.BackupStorageLocation))
+                settings.BackupStorageLocation = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "SaveVault", "Backups");
+            
+            if (settings.UpdateCheckInterval <= 0)
+                settings.UpdateCheckInterval = 24;
+
+            // Set this as the static instance
+            _instance = settings;
+            Debug.WriteLine("New settings instance created and set as static instance");
+
+            // Save the settings if they were just created
+            if (!File.Exists(SettingsPath))
+            {
+                settings.ForceSave();
+            }
+
+            return settings;
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"Error loading settings: {ex.Message}");
+            
+            // Return new settings instance if loading fails
+            var newSettings = new Settings();
+            _instance = newSettings;
+            
+            try
+            {
+                Debug.WriteLine("Saving new default settings");
+                newSettings.ForceSave();
+            }
+            catch (Exception saveEx)
+            {
+                Debug.WriteLine($"Failed to save new settings: {saveEx.Message}");
+            }
+            
+            return newSettings;
         }
-          // Return new settings if file doesn't exist or loading fails
-        var newSettings = new Settings();
-        _instance = newSettings;
-        
-        // Explicitly save the new settings file if it didn't exist before
-        try {
-            Debug.WriteLine("Creating new settings file since one doesn't exist");
-            newSettings.ForceSave();
-        }
-        catch (Exception ex) {
-            Debug.WriteLine($"Failed to create new settings file: {ex.Message}");
-        }
-        
-        return newSettings;
-    }    public void Save()
+    }
+
+    // Add method to update a collection item and save changes
+    public void UpdateDictionary<TKey, TValue>(Dictionary<TKey, TValue> dict, TKey key, TValue value) 
+        where TKey : notnull
     {
-        try
+        dict[key] = value;
+        QueueSave();
+    }
+    
+    // Add method to remove from a collection and save changes
+    public bool RemoveFromDictionary<TKey, TValue>(Dictionary<TKey, TValue> dict, TKey key) 
+        where TKey : notnull
+    {
+        var result = dict.Remove(key);
+        if (result)
         {
-            // Use the ForceSave method to ensure the file is created properly
+            QueueSave();
+        }
+        return result;
+    }
+    
+    // Add/Update methods for collections with immediate save option
+    public void AddOrUpdateLastUsedTime(string key, DateTime value, bool saveImmediately = false)
+    {
+        LastUsedTimes[key] = value;
+        if (saveImmediately)
+        {
             ForceSave();
         }
-        catch (Exception ex)
+        else
         {
-            Debug.WriteLine($"Error in Save method: {ex.Message}");
-            try
-            {
-                // Log more detailed information through the logging service
-                if (Services.LoggingService.Instance != null)
-                {
-                    Services.LoggingService.Instance.Error($"Failed to save settings: {ex.Message}");
-                    Services.LoggingService.Instance.Error($"Stack trace: {ex.StackTrace}");
-                }
-            }
-            catch
-            {
-                // Just in case logging fails too
-                Debug.WriteLine("Failed to log through LoggingService");
-            }
+            QueueSave();
         }
-    }    // Force save with retry logic
-    public void ForceSave()
+    }
+    
+    public void AddOrUpdateLastBackupTime(string key, DateTime value, bool saveImmediately = false)
     {
-        int maxRetries = 3;
-        int retryCount = 0;
-        bool saved = false;
-        
-        // Use logging service for better visibility in dotnet run
-        var logger = SaveVaultApp.Services.LoggingService.Instance;
-        logger.Debug($"ForceSave called for settings.json");
-        
-        // Correct any future dates that might be in the settings before saving
-        // This prevents invalid dates from being saved to settings.json
-        DateTime now = DateTime.Now;
-        foreach (var key in LastUsedTimes.Keys.ToList())
+        LastBackupTimes[key] = value;
+        if (saveImmediately)
         {
-            if (LastUsedTimes[key] > now)
+            ForceSave();
+        }
+        else
+        {
+            QueueSave();
+        }
+    }
+    
+    // Changed from static to instance fields for better resource management
+    private System.Threading.Timer? _saveTimer;
+    private readonly object _saveLock = new object();
+    private DateTime _lastSaveTime = DateTime.MinValue;
+    private bool _hasUnsavedChanges = false;
+    private readonly TimeSpan _saveThrottleInterval = TimeSpan.FromSeconds(2); // Reduced from 5 to 2 seconds
+    
+    public void QueueSave()
+    {
+        lock (_saveLock)
+        {
+            _hasUnsavedChanges = true;
+            Debug.WriteLine("Settings change queued for save");
+            
+            // If we're the static instance, save now
+            if (this == _instance)
             {
-                logger.Warning($"Correcting future date in LastUsedTimes for {key}: {LastUsedTimes[key]} to {now}");
-                LastUsedTimes[key] = now;
+                Debug.WriteLine("Settings is static instance, saving immediately");
+                Save();
+            }
+            else
+            {
+                Debug.WriteLine("WARNING: Settings change on non-static instance");
+                // Try to save through the static instance
+                if (_instance != null)
+                {
+                    _instance.Save();
+                }
+                else
+                {
+                    Debug.WriteLine("CRITICAL: No static settings instance available!");
+                }
             }
         }
-        
-        foreach (var key in LastBackupTimes.Keys.ToList())
+    }
+
+    public void Save()
+    {
+        lock (_saveLock)
         {
-            if (LastBackupTimes[key] > now)
+            if (!_hasUnsavedChanges)
             {
-                logger.Warning($"Correcting future date in LastBackupTimes for {key}: {LastBackupTimes[key]} to {now}");
-                LastBackupTimes[key] = now;
+                Debug.WriteLine("No changes to save");
+                return;
             }
-        }
-        
-        while (!saved && retryCount < maxRetries)
-        {
+
             try
             {
-                retryCount++;
-                logger.Debug($"Force save attempt #{retryCount}");
-                
-                // Make sure this instance is set as the static instance
-                if (_instance != this)
-                {
-                    _instance = this;
-                    logger.Debug("Updated static instance reference");
-                }
+                Debug.WriteLine($"Saving settings to: {SettingsPath}");
                 
                 var directory = Path.GetDirectoryName(SettingsPath);
-                logger.Debug($"Settings directory: {directory}");
-                
                 if (!Directory.Exists(directory) && directory != null)
                 {
                     Directory.CreateDirectory(directory);
-                    logger.Debug($"Created settings directory: {directory}");
                 }
-                
-                logger.Debug("Serializing settings to JSON");
-                var options = new JsonSerializerOptions { 
+
+                // Always use atomic save to prevent corruption
+                var tempPath = Path.Combine(
+                    Path.GetDirectoryName(SettingsPath) ?? string.Empty,
+                    $"settings.{Guid.NewGuid():N}.tmp"
+                );
+
+                var options = new JsonSerializerOptions 
+                { 
                     WriteIndented = true,
                     IncludeFields = true,
                     DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-                    ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles
+                    ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles,
+                    NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
                 };
+
+                // First verify we can serialize
                 var json = JsonSerializer.Serialize(this, options);
-                logger.Debug($"JSON serialization complete, length: {json.Length}");
                 
-                // Make a backup of the current settings file before overwriting
+                // Write to temp file
+                File.WriteAllText(tempPath, json);
+
+                // Create backup of current settings if it exists
                 if (File.Exists(SettingsPath))
                 {
-                    string backupPath = SettingsPath + ".bak";
-                    try
+                    var backupPath = SettingsPath + ".bak";
+                    if (File.Exists(backupPath))
                     {
-                        File.Copy(SettingsPath, backupPath, true);
-                        logger.Debug($"Created settings backup at: {backupPath}");
+                        File.Delete(backupPath);
                     }
-                    catch (Exception ex)
-                    {
-                        logger.Warning($"Failed to create settings backup: {ex.Message}");
-                    }
+                    File.Move(SettingsPath, backupPath);
                 }
-                
-                // Write directly to settings file
-                logger.Debug($"Writing to settings file: {SettingsPath}");
-                File.WriteAllText(SettingsPath, json);
-                
-                if (File.Exists(SettingsPath))
+
+                // Move temp file to final location
+                File.Move(tempPath, SettingsPath);
+
+                _lastSaveTime = DateTime.Now;
+                _hasUnsavedChanges = false;
+
+                Debug.WriteLine("Settings saved successfully");
+
+                var logger = Services.LoggingService.Instance;
+                if (logger != null)
                 {
-                    logger.Debug($"Settings file exists after write, size: {new FileInfo(SettingsPath).Length} bytes");
-                    saved = true;
-                }
-                else 
-                {
-                    logger.Warning("Direct write failed, trying with temp file approach");
-                    
-                    // Use a temporary file to write to first, then move it
-                    string tempFile = Path.Combine(
-                        Path.GetDirectoryName(SettingsPath) ?? string.Empty, 
-                        $"temp_settings_{Guid.NewGuid():N}.json");
-                    
-                    logger.Debug($"Writing to temporary file: {tempFile}");
-                    File.WriteAllText(tempFile, json);
-                    
-                    if (File.Exists(SettingsPath))
-                    {
-                        logger.Debug($"Deleting existing settings file");
-                        File.Delete(SettingsPath);
-                    }
-                    
-                    logger.Debug($"Moving temporary file to settings path");
-                    File.Move(tempFile, SettingsPath);
-                    
-                    if (File.Exists(SettingsPath))
-                    {
-                        logger.Debug("Settings file successfully saved using temp file approach");
-                        saved = true;
-                    }
-                    else
-                    {
-                        logger.Warning("WARNING: Settings file was not created after move operation");
-                    }
+                    // Log key settings values after save
+                    logger.Debug($"Settings saved - AutoSaveInterval: {AutoSaveInterval}, GlobalAutoSaveEnabled: {GlobalAutoSaveEnabled}");
                 }
             }
             catch (Exception ex)
             {
-                logger.Error($"Error in force save attempt #{retryCount}: {ex.Message}");
-                logger.Debug($"Stack trace: {ex.StackTrace}");
-                
-                // Wait before retrying
-                System.Threading.Thread.Sleep(100);
+                Debug.WriteLine($"Error saving settings: {ex.Message}");
+                if (Services.LoggingService.Instance != null)
+                {
+                    Services.LoggingService.Instance.Error($"Failed to save settings: {ex.Message}");
+                }
             }
         }
-          if (!saved)
+    }
+
+    // Enhanced ForceSave that always saves immediately
+    public void ForceSave()
+    {
+        lock (_saveLock)
         {
-            logger.Error($"CRITICAL: Failed to save settings after {maxRetries} attempts!");
-              
-            // First try a simplified approach
-            try {
-                logger.Debug("Attempting emergency save with simplified serialization");
-                var emergencyOptions = new JsonSerializerOptions { 
-                    WriteIndented = true, 
-                    IncludeFields = true 
-                };
-                var emergencyJson = JsonSerializer.Serialize(this, emergencyOptions);
-                File.WriteAllText(SettingsPath, emergencyJson);
-                logger.Debug("Emergency save attempt complete");
-                
-                if (File.Exists(SettingsPath)) {
-                    logger.Info($"Emergency save succeeded, file size: {new FileInfo(SettingsPath).Length} bytes");
-                    saved = true;
-                }
-            } 
-            catch (Exception ex) {
-                logger.Error($"Emergency save failed: {ex.Message}");
-                
-                // As an absolute last resort, try saving with minimal properties
-                try {
-                    logger.Debug("Attempting bare-minimum save");                    // Create a more comprehensive settings object with essential properties
-                    var minimalSettings = new { 
-                        Theme = this.Theme,
-                        WindowWidth = this.WindowWidth,
-                        WindowHeight = this.WindowHeight,
-                        WindowPositionX = this.WindowPositionX,
-                        WindowPositionY = this.WindowPositionY,
-                        IsMaximized = this.IsMaximized,
-                        SortOption = this.SortOption,
-                        HiddenGamesExpanded = this.HiddenGamesExpanded,
-                        OptionsWindowWidth = this.OptionsWindowWidth,
-                        OptionsWindowHeight = this.OptionsWindowHeight
-                    };
-                    
-                    var minimalJson = JsonSerializer.Serialize(minimalSettings, new JsonSerializerOptions { 
-                        WriteIndented = true,
-                        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-                        ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles
-                    });
-                    File.WriteAllText(SettingsPath, minimalJson);
-                    
-                    if (File.Exists(SettingsPath)) {
-                        logger.Info($"Minimal save succeeded, file size: {new FileInfo(SettingsPath).Length} bytes");
-                    }
-                }
-                catch (Exception minEx) {
-                    logger.Critical($"All save attempts failed: {minEx.Message}");
-                }
-            }
+            _hasUnsavedChanges = true;
+            Save();
         }
-    }      // Method to debug settings by showing all set properties
+    }    // Method to debug settings by showing all set properties
     public void LogActiveSettings()
     {
         var logger = SaveVaultApp.Services.LoggingService.Instance;
@@ -518,7 +842,7 @@ public class AppSpecificSettings
         set
         {
             _hasCustomSettings = value;
-            SaveSettings();
+            QueueSettingsSave();
         }
     }
 
@@ -529,7 +853,7 @@ public class AppSpecificSettings
         set
         {
             _autoSaveInterval = value;
-            SaveSettings();
+            QueueSettingsSave();
         }
     }
 
@@ -540,7 +864,7 @@ public class AppSpecificSettings
         set
         {
             _autoSaveEnabled = value;
-            SaveSettings();
+            QueueSettingsSave();
         }
     }
 
@@ -551,7 +875,7 @@ public class AppSpecificSettings
         set
         {
             _startSaveEnabled = value;
-            SaveSettings();
+            QueueSettingsSave();
         }
     }
 
@@ -562,7 +886,7 @@ public class AppSpecificSettings
         set
         {
             _maxAutoSaves = value;
-            SaveSettings();
+            QueueSettingsSave();
         }
     }
     
@@ -573,25 +897,16 @@ public class AppSpecificSettings
         set
         {
             _maxStartSaves = value;
-            SaveSettings();
+            QueueSettingsSave();
         }
-    }    private void SaveSettings()
+    }
+
+    private void QueueSettingsSave()
     {
-        // Get the instance of Settings class if available
-        var settings = SaveVaultApp.Models.Settings.Instance;
+        var settings = Settings.Instance;
         if (settings != null)
         {
-            // Ensure the app settings get saved
-            settings.Save();
-        }
-        else
-        {
-            // If no instance, try to load or create a new one and save
-            settings = Settings.Load();
-            if (settings != null)
-            {
-                settings.Save();
-            }
+            settings.QueueSave();
         }
     }
 }

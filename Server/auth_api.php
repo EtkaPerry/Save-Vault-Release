@@ -33,9 +33,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $requestUri = $_SERVER['REQUEST_URI'];
 $requestMethod = $_SERVER['REQUEST_METHOD'];
 
+// Add debugging
+error_log("Request URI: " . $requestUri);
+error_log("REQUEST_METHOD: " . $requestMethod);
+
 // Parse the request path
 $path = parse_url($requestUri, PHP_URL_PATH);
-$path = str_replace('/api/', '', $path);
+error_log("Path from parse_url: " . $path);
+
+// Extract final part of path after auth_api.php/
+if (strpos($path, 'auth_api.php/') !== false) {
+    $path = substr($path, strpos($path, 'auth_api.php/') + strlen('auth_api.php/'));
+    error_log("Path after auth_api.php/: " . $path);
+} else {
+    // Check if there's a query string endpoint
+    if (isset($_GET) && !empty($_GET)) {
+        // Get the first key in the query string as the endpoint
+        reset($_GET);
+        $path = key($_GET);
+        error_log("Path from query string: " . $path);
+    } else {
+        $path = '';
+        error_log("No path found in URL");
+    }
+}
+
+// Clean up path by removing any additional slashes
+$path = trim($path, '/');
+error_log("Final path: " . $path);
 
 // Handle additional URI format possibilities - Support both /api/login and just /login
 if (strpos($path, 'api/') === 0) {

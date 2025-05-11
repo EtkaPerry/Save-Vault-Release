@@ -9,8 +9,8 @@ RewriteRule ^.*\.(?:git|env|log|lock|md)$ - [F,L]
 
 # Custom 404 error page
 
-# Route all /api/* requests to auth_api.php
-RewriteRule ^api/(.*)$ auth_api.php [L,QSA]
+# Route all /api/* requests to api.php (changed from auth_api.php to match client expectations)
+RewriteRule ^api/(.*)$ api.php [L,QSA]
 
 # Handle clean URLs for pages
 

@@ -51,7 +51,7 @@ switch ($action) {
         handleForgotPassword();
         break;
     default:
-        sendResponse(false, "Endpoint not found", 404);
+        sendResponse(false, "Endpoint not found", null, 404);
         break;
 }
 
@@ -60,18 +60,20 @@ switch ($action) {
  */
 function handleLogin() {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        sendResponse(false, "Method not allowed", 405);
+        sendResponse(false, "Method not allowed", null, 405);
         return;
-    }    // Get JSON input
+    }
+    // Get JSON input
     $data = json_decode(file_get_contents('php://input'), true);
     
     if (!isset($data['usernameOrEmail']) || !isset($data['password'])) {
-        sendResponse(false, "Username/email and password are required", 400);
+        sendResponse(false, "Username/email and password are required", null, 400);
         return;
     }
 
     $usernameOrEmail = $data['usernameOrEmail'];
-    $password = $data['password'];    global $db;
+    $password = $data['password'];
+    global $db;
     
     try {
         // Check if user exists by username or email
@@ -82,7 +84,7 @@ function handleLogin() {
         $result = $stmt->get_result();
         
         if ($result->num_rows === 0) {
-            sendResponse(false, "Invalid username or password", 401);
+            sendResponse(false, "Invalid username or password", null, 401);
             return;
         }
         
@@ -91,7 +93,7 @@ function handleLogin() {
         // Verify password
         // Fix: Changed 'password_hash' to 'password' to match DB schema
         if (!password_verify($password, $user['password'])) {
-            sendResponse(false, "Invalid username or password", 401);
+            sendResponse(false, "Invalid username or password", null, 401);
             return;
         }
         
@@ -110,13 +112,13 @@ function handleLogin() {
         $expire = $issuedAt + JWT_EXPIRE; // Use defined constant
         $token = generateJWT($user['id'], $user['username'], $issuedAt, $expire);
         
-        sendResponse(true, "Login successful", 200, [
+        sendResponse(true, "Login successful", [
             'token' => $token,
             'username' => $user['username']
-        ]);
+        ], 200);
         
     } catch (Exception $e) {
-        sendResponse(false, "Server error: " . $e->getMessage(), 500);
+        sendResponse(false, "Server error: " . $e->getMessage(), null, 500);
     }
 }
 
@@ -125,13 +127,14 @@ function handleLogin() {
  */
 function handleRegister() {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        sendResponse(false, "Method not allowed", 405);
+        sendResponse(false, "Method not allowed", null, 405);
         return;
-    }    // Get JSON input
+    }
+    // Get JSON input
     $data = json_decode(file_get_contents('php://input'), true);
     
     if (!isset($data['username']) || !isset($data['password']) || !isset($data['email'])) {
-        sendResponse(false, "Username, email, and password are required", 400);
+        sendResponse(false, "Username, email, and password are required", null, 400);
         return;
     }
 
@@ -141,35 +144,38 @@ function handleRegister() {
     
     // Validate username (only alphanumeric and underscore, 3-20 chars)
     if (!preg_match('/^[a-zA-Z0-9_]{3,20}$/', $username)) {
-        sendResponse(false, "Username must be 3-20 characters and contain only letters, numbers, and underscores", 400);
+        sendResponse(false, "Username must be 3-20 characters and contain only letters, numbers, and underscores", null, 400);
         return;
     }
     
     // Validate email format
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        sendResponse(false, "Please provide a valid email address", 400);
+        sendResponse(false, "Please provide a valid email address", null, 400);
         return;
     }
     
     // Validate password (at least 8 chars)
     if (strlen($password) < 8) {
-        sendResponse(false, "Password must be at least 8 characters", 400);
+        sendResponse(false, "Password must be at least 8 characters", null, 400);
         return;
-    }    global $db;
+    }
+    global $db;
     
-    try {        // Check if username or email already exists
+    try {
+        // Check if username or email already exists
         $stmt = $db->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
         $stmt->bind_param("ss", $username, $email);
         $stmt->execute();
         $result = $stmt->get_result();
         
         if ($result->num_rows > 0) {
-            sendResponse(false, "Username or email already exists", 409);
+            sendResponse(false, "Username or email already exists", null, 409);
             return;
         }
         
         // Hash the password
-        $passwordHash = password_hash($password, PASSWORD_DEFAULT);        // Insert new user with email
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+        // Insert new user with email
         // Get user's IP address
         $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN';
 
@@ -181,7 +187,7 @@ function handleRegister() {
         
         if (!$success) {
             // Provide more specific error if possible
-            sendResponse(false, "Registration failed: " . $stmt->error, 500); 
+            sendResponse(false, "Registration failed: " . $stmt->error, null, 500); 
             $stmt->close(); // Close statement on failure
             return;
         }
@@ -195,13 +201,13 @@ function handleRegister() {
         $expire = $issuedAt + JWT_EXPIRE; // Use defined constant
         $token = generateJWT($userId, $username, $issuedAt, $expire);
         
-        sendResponse(true, "Registration successful", 201, [
+        sendResponse(true, "Registration successful", [
             'token' => $token,
             'username' => $username
-        ]);
+        ], 201);
         
     } catch (Exception $e) {
-        sendResponse(false, "Server error: " . $e->getMessage(), 500);
+        sendResponse(false, "Server error: " . $e->getMessage(), null, 500);
     }
 }
 
@@ -213,7 +219,7 @@ function validateToken() {
     $authHeader = isset($headers['Authorization']) ? $headers['Authorization'] : '';
     
     if (empty($authHeader) || !preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
-        sendResponse(false, "No token provided", 401);
+        sendResponse(false, "No token provided", null, 401);
         return;
     }
     
@@ -221,13 +227,13 @@ function validateToken() {
     $payload = verifyJWT($token);
     
     if ($payload === false) {
-        sendResponse(false, "Invalid token", 401);
+        sendResponse(false, "Invalid token", null, 401);
         return;
     }
     
-    sendResponse(true, "Token is valid", 200, [
+    sendResponse(true, "Token is valid", [
         'username' => $payload['username']
-    ]);
+    ], 200);
 }
 
 /**
@@ -249,7 +255,7 @@ function handleSync() {
         // Save user's data
         saveUserData($user['user_id']);
     } else {
-        sendResponse(false, "Method not allowed", 405);
+        sendResponse(false, "Method not allowed", null, 405);
     }
 }
 
@@ -266,17 +272,17 @@ function getUserData($userId) {
         $result = $stmt->get_result();
         
         if ($result->num_rows === 0) {
-            sendResponse(true, "No data found", 200, ['data' => null]);
+            sendResponse(true, "No data found", ['data' => null], 200);
             return;
         }
         
         $row = $result->fetch_assoc();
         $data = json_decode($row['data'], true);
         
-        sendResponse(true, "Data retrieved", 200, ['data' => $data]);
+        sendResponse(true, "Data retrieved", ['data' => $data], 200);
         
     } catch (Exception $e) {
-        sendResponse(false, "Server error: " . $e->getMessage(), 500);
+        sendResponse(false, "Server error: " . $e->getMessage(), null, 500);
     }
 }
 
@@ -288,7 +294,7 @@ function saveUserData($userId) {
     $input = json_decode(file_get_contents('php://input'), true);
     
     if (!isset($input['data'])) {
-        sendResponse(false, "No data provided", 400);
+        sendResponse(false, "No data provided", null, 400);
         return;
     }
     
@@ -316,14 +322,14 @@ function saveUserData($userId) {
         $success = $stmt->execute();
         
         if (!$success) {
-            sendResponse(false, "Failed to save data", 500);
+            sendResponse(false, "Failed to save data", null, 500);
             return;
         }
         
-        sendResponse(true, "Data saved successfully", 200);
+        sendResponse(true, "Data saved successfully", null, 200);
         
     } catch (Exception $e) {
-        sendResponse(false, "Server error: " . $e->getMessage(), 500);
+        sendResponse(false, "Server error: " . $e->getMessage(), null, 500);
     }
 }
 
@@ -332,7 +338,7 @@ function saveUserData($userId) {
  */
 function handleForgotPassword() {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        sendResponse(false, "Method not allowed", 405);
+        sendResponse(false, "Method not allowed", null, 405);
         return;
     }
 
@@ -340,7 +346,7 @@ function handleForgotPassword() {
     $data = json_decode(file_get_contents('php://input'), true);
     
     if (!isset($data['username']) || !isset($data['email'])) {
-        sendResponse(false, "Both username and email are required", 400);
+        sendResponse(false, "Both username and email are required", null, 400);
         return;
     }
 
@@ -359,7 +365,7 @@ function handleForgotPassword() {
         if ($result->num_rows === 0) {
             // For security, return success even if user isn't found
             // This prevents email enumeration attacks
-            sendResponse(true, "If your account exists, password reset instructions have been sent to your email", 200);
+            sendResponse(true, "If your account exists, password reset instructions have been sent to your email", null, 200);
             return;
         }
         
@@ -376,10 +382,10 @@ function handleForgotPassword() {
         // In a real application, send an email with the reset link
         // This is just a placeholder - you would integrate with an email service
         
-        sendResponse(true, "Password reset instructions sent to your email", 200);
+        sendResponse(true, "Password reset instructions sent to your email", null, 200);
         
     } catch (Exception $e) {
-        sendResponse(false, "Server error: " . $e->getMessage(), 500);
+        sendResponse(false, "Server error: " . $e->getMessage(), null, 500);
     }
 }
 
@@ -393,7 +399,7 @@ function authenticateRequest() {
     $authHeader = isset($headers['Authorization']) ? $headers['Authorization'] : '';
     
     if (empty($authHeader) || !preg_match('/Bearer\s(\S+)/', $authHeader, $matches)) {
-        sendResponse(false, "Authentication required", 401);
+        sendResponse(false, "Authentication required", null, 401);
         return false;
     }
     
@@ -401,7 +407,7 @@ function authenticateRequest() {
     $payload = verifyJWT($token);
     
     if ($payload === false) {
-        sendResponse(false, "Invalid token", 401);
+        sendResponse(false, "Invalid token", null, 401);
         return false;
     }
     
@@ -410,18 +416,19 @@ function authenticateRequest() {
 
 /**
  * Sends a formatted JSON response
+ * @param bool $success Whether the request was successful
+ * @param string $message Response message
+ * @param mixed $data Additional data to include in the response (optional)
+ * @param int $statusCode HTTP status code (default: 200)
  */
-function sendResponse($success, $message, $statusCode, $data = []) {
+function sendResponse($success, $message, $data = null, $statusCode = 200) {
     http_response_code($statusCode);
     
     $response = [
         'success' => $success,
-        'message' => $message
+        'message' => $message,
+        'data' => $data
     ];
-    
-    if (!empty($data)) {
-        $response['data'] = $data;
-    }
     
     echo json_encode($response);
     exit();

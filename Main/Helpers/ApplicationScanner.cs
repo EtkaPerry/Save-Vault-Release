@@ -30,9 +30,28 @@ namespace SaveVaultApp.Helpers
                 {
                     Avalonia.Threading.Dispatcher.UIThread.Post(() => installedApps.Add(app));
                 }
-            }            // Initialize search paths
+            }
+            
+            // Initialize search paths
             var searchPaths = new List<string>();
             LoggingService.Instance.Info("Starting enhanced application discovery scan...");
+            
+            // Scan for known games first
+            try
+            {
+                LoggingService.Instance.Info("Scanning for known games based on folder patterns...");
+                var knownGames = SaveLocationDetector.ScanForKnownGames(settings, processedExecutables);
+                foreach (var game in knownGames)
+                {
+                    AddAppSafely(game);
+                }
+                LoggingService.Instance.Info($"Found {knownGames.Count} games based on folder patterns");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error during known game scan: {ex.Message}");
+                LoggingService.Instance.Error($"Error during known game scan: {ex.Message}");
+            }
             
             // Then scan the Windows Registry for installed applications
             try
@@ -231,7 +250,6 @@ namespace SaveVaultApp.Helpers
             
             LoggingService.Instance.Info($"Enhanced scan completed. Found {processedExecutables.Count} unique executables.");
         }
-          // KnownGamesFromConfig method removed - we will rebuild this functionality later
         
         private static void SearchDirectoryForExecutables(string directory, ObservableCollection<ApplicationInfo> apps, 
             HashSet<string> processedExecutables, Settings settings, int maxDepth = 6, int currentDepth = 0, Action<ApplicationInfo>? addAppCallback = null)

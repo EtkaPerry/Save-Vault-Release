@@ -1064,35 +1064,58 @@ public partial class MainWindowViewModel : ViewModelBase
                     if (app.BackupHistory.Count > 0)
                         app.LastBackupTime = app.BackupHistory.Max(b => b.Timestamp);
                 }
-                  // Apply customizations from AppData (with fallbacks to older locations)
+                // Apply customizations from AppData (with fallbacks to older locations)
                 string originalName = app.Name; // Remember original name before customization
+                bool hasCustomName = false;
                 if (_appData.CustomNames != null && _appData.CustomNames.TryGetValue(exePath, out string? appListCustomName) && !string.IsNullOrWhiteSpace(appListCustomName))
+                {
                     app.Name = appListCustomName;
+                    hasCustomName = true;
+                }
                 else if (_appData.CustomNames != null && _appData.CustomNames.TryGetValue(exePath, out string? appDataCustomName) && !string.IsNullOrWhiteSpace(appDataCustomName))
+                {
                     app.Name = appDataCustomName;
+                    hasCustomName = true;
+                }
                 else if (_settings.CustomNames != null && _settings.CustomNames.TryGetValue(exePath, out string? settingsCustomName) && !string.IsNullOrWhiteSpace(settingsCustomName))
+                {
                     app.Name = settingsCustomName;
-                
+                    hasCustomName = true;
+                }
+
+                // If no custom name, try to get a nice name from KnownGames
+                if (!hasCustomName)
+                {
+                    var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                        string.Equals(g.Executable, System.IO.Path.GetFileName(exePath), StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrEmpty(g.GameFolder) && (app.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                        System.IO.Path.GetFileName(app.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    if (knownGame != null && !string.IsNullOrWhiteSpace(knownGame.Name))
+                    {
+                        app.Name = knownGame.Name;
+                    }
+                }
+
                 // Ensure backup paths match the current name if needed
                 if (originalName != app.Name)
                 {
                     EnsureBackupPathsMatchAppName(app, originalName);
                 }
-                    
+
                 if (_appData.CustomSavePaths != null && _appData.CustomSavePaths.TryGetValue(exePath, out string? appListCustomSavePath) && !string.IsNullOrWhiteSpace(appListCustomSavePath))
                     app.SavePath = appListCustomSavePath;
                 else if (_appData.CustomSavePaths != null && _appData.CustomSavePaths.TryGetValue(exePath, out string? appDataCustomSavePath) && !string.IsNullOrWhiteSpace(appDataCustomSavePath))
                     app.SavePath = appDataCustomSavePath;
                 else if (_settings.CustomSavePaths != null && _settings.CustomSavePaths.TryGetValue(exePath, out string? settingsCustomSavePath) && !string.IsNullOrWhiteSpace(settingsCustomSavePath))
                     app.SavePath = settingsCustomSavePath;
-                
+
                 if (_appData.HiddenApps != null && _appData.HiddenApps.Contains(exePath))
                     app.IsHidden = true;
                 else if (_appData.HiddenApps != null && _appData.HiddenApps.Contains(exePath))
                     app.IsHidden = true;
                 else if (_settings.HiddenApps != null && _settings.HiddenApps.Contains(exePath))
                     app.IsHidden = true;
-                
+
                 LoadAppSettings(app);
 
                 AllInstalledApps.Add(app);
@@ -1837,17 +1860,21 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         // Use the new SaveLocationDetector utility class to detect save paths
         var result = Utilities.SaveLocationDetector.DetectSavePath(app);
-          if (!string.IsNullOrEmpty(result.GameName))
+        if (!string.IsNullOrEmpty(result.GameName))
         {
             // Only update if not already customized by the user
             if (!_appData.CustomNames.ContainsKey(app.ExecutablePath) && !_settings.CustomNames.ContainsKey(app.ExecutablePath))
             {
                 app.Name = result.GameName;
+                // Save the detected name to AppData.CustomNames to persist between application launches
+                _appData.CustomNames[app.ExecutablePath] = result.GameName;
+                _appData.Save();
             }
         }
         
         return result.SavePath;
-    }    [RelayCommand]
+    }
+    [RelayCommand]
     public void ResetCache()
     {
         // Clear all saved data in settings

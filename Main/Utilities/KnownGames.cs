@@ -46,12 +46,13 @@ namespace SaveVaultApp.Utilities
                 LaunchFromSteam = "steam://run/294100",
                 Uninstall = "steam://uninstall/294100",
                 Store = "steam://store/294100"
-            },              new KnownGameInfo
+            },            
+            new KnownGameInfo
             {
                 Name = "Europe Universalis IV",
                 GameFolder = "Europa Universalis IV",
                 Executable = "eu4.exe",
-                SavePath = "%STEAMPATH%\\userdata\\*\\236850\\remote",
+                SavePath = "userdata\\*\\236850\\remote",
                 Platform = "Steam",
                 LaunchFromSteam = "steam://run/236850",
                 Uninstall = "steam://uninstall/236850",

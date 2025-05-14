@@ -2575,7 +2575,7 @@ public partial class MainWindowViewModel : ViewModelBase
             StatusMessage = "Global auto-save disabled. No automatic backups will occur.";
         }
     }
-
+    
     [RelayCommand]
     private void ToggleCustomSettings()
     {
@@ -3477,161 +3477,486 @@ public partial class MainWindowViewModel : ViewModelBase
         IsHiddenGamesExpanded = !IsHiddenGamesExpanded;
     }
     
-    /// <summary>
-    /// Updates backup folder references after the app's name changes
-    /// </summary>
-    /// <param name="executablePath">The app's executable path (used as key in settings)</param>
-    /// <param name="oldName">The previous name of the app</param>
-    /// <param name="newName">The new name of the app</param>
-    private void UpdateBackupFoldersAfterNameChange(string executablePath, string oldName, string newName)
+    // Properties for Steam launch options
+    public bool HasSteamLaunchOption
     {
+        get
+        {
+            if (SelectedApp == null)
+                return false;
+                
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            return knownGame != null && !string.IsNullOrEmpty(knownGame.LaunchFromSteam);
+        }
+    }
+    
+    public bool HasAlternExec1
+    {
+        get
+        {
+            if (SelectedApp == null)
+                return false;
+                
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            return knownGame != null && !string.IsNullOrEmpty(knownGame.AlternExec1);
+        }
+    }
+    
+    public bool HasAlternExec2
+    {
+        get
+        {
+            if (SelectedApp == null)
+                return false;
+                
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            return knownGame != null && !string.IsNullOrEmpty(knownGame.AlternExec2);
+        }
+    }
+    
+    public bool HasStorePage
+    {
+        get
+        {
+            if (SelectedApp == null)
+                return false;
+                
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            return knownGame != null && !string.IsNullOrEmpty(knownGame.Store);
+        }
+    }
+    
+    public bool HasUninstallOption
+    {
+        get
+        {
+            if (SelectedApp == null)
+                return false;
+                
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            return knownGame != null && !string.IsNullOrEmpty(knownGame.Uninstall);
+        }
+    }
+    
+    [RelayCommand]
+    private void LaunchFromSteam()
+    {
+        if (SelectedApp == null)
+            return;
+            
         try
         {
-            // Skip if there's no backup history for this app
-            if (!_settings.BackupHistory.TryGetValue(executablePath, out var backupList) || backupList.Count == 0)
-                return;
-                
-            string oldSanitizedName = SanitizePathName(oldName);
-            string newSanitizedName = SanitizePathName(newName);
-            
-            // Get the app instance from the all installed apps list
-            var app = AllInstalledApps.FirstOrDefault(a => 
-                string.Equals(a.ExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase));
-                
-            if (app == null)
-                return;
-                
-            // Check if we need to handle physical folder renaming
-            bool oldFolderExists = Directory.Exists(Path.Combine(_backupRootFolder, oldSanitizedName));
-            bool newFolderExists = Directory.Exists(Path.Combine(_backupRootFolder, newSanitizedName));
-            
-            // Option 1: Physically move the folder (if it exists and target doesn't)
-            if (oldFolderExists && !newFolderExists)
+            // Find the matching known game
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            if (knownGame != null && !string.IsNullOrEmpty(knownGame.LaunchFromSteam))
             {
-                try
+                // Launch the game via Steam URL protocol
+                ProcessStartInfo startInfo = new ProcessStartInfo(knownGame.LaunchFromSteam)
                 {
-                    // Attempt to move the physical directory
-                    Directory.Move(
-                        Path.Combine(_backupRootFolder, oldSanitizedName), 
-                        Path.Combine(_backupRootFolder, newSanitizedName));
-                    
-                    // Update the paths in backup history
-                    foreach (var backup in backupList)
-                    {
-                        backup.BackupPath = backup.BackupPath.Replace(
-                            Path.Combine(_backupRootFolder, oldSanitizedName),
-                            Path.Combine(_backupRootFolder, newSanitizedName));
-                    }
-                    
-                    // Update paths in the UI collection too
-                    foreach (var backup in app.BackupHistory)
-                    {
-                        backup.BackupPath = backup.BackupPath.Replace(
-                            Path.Combine(_backupRootFolder, oldSanitizedName),
-                            Path.Combine(_backupRootFolder, newSanitizedName));
-                    }
-                    
-                    // Save the updated paths to settings
-                    _settings.Save();
-                }
-                catch (Exception ex)
+                    UseShellExecute = true
+                };
+                Process.Start(startInfo);
+                
+                // Update LastUsed time and persist it
+                SelectedApp.LastUsed = DateTime.Now;
+                _settings.LastUsedTimes[SelectedApp.ExecutablePath] = SelectedApp.LastUsed;
+                _settings.ForceSave();
+                
+                // If sorted by last used, refresh the sort
+                if (SelectedSortOption == "Last Used")
                 {
-                    Debug.WriteLine($"Failed to rename backup folder: {ex.Message}");
-                    // Continue with the next approach if moving fails
+                    ApplySort();
                 }
+                
+                // Immediately check running applications after launching
+                UpdateRunningApplications();
+                
+                StatusMessage = $"Launched {SelectedApp.Name} via Steam";
             }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error launching application from Steam: {ex.Message}");
+            StatusMessage = $"Error launching from Steam: {ex.Message}";
+        }
+    }
+    
+    [RelayCommand]
+    private void LaunchAlternExec1()
+    {
+        if (SelectedApp == null)
+            return;
             
-            // Option 2: If physical move didn't happen or failed, update the UI to recognize old paths
-            if (!Directory.Exists(Path.Combine(_backupRootFolder, newSanitizedName)))
+        try
+        {
+            // Find the matching known game
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            if (knownGame != null && !string.IsNullOrEmpty(knownGame.AlternExec1))
             {
-                // Just make sure the UI shows correct backups
-                app.BackupHistory.Clear();
-                foreach (var backup in backupList.OrderByDescending(b => b.Timestamp))
-                {
-                    app.BackupHistory.Add(new SaveBackupInfo
-                    {
-                        BackupPath = backup.BackupPath,
-                        Timestamp = backup.Timestamp,
-                        Description = backup.Description,
-                        IsAutoBackup = backup.IsAutoBackup
-                    });
-                }
+                string alternativePath = Path.Combine(SelectedApp.Path, knownGame.AlternExec1);
                 
-                if (app.BackupHistory.Count > 0)
+                if (File.Exists(alternativePath))
                 {
-                    app.LastBackupTime = app.BackupHistory.Max(b => b.Timestamp);
+                    // Launch the alternative executable
+                    ProcessStartInfo startInfo = new ProcessStartInfo(alternativePath)
+                    {
+                        UseShellExecute = true,
+                        WorkingDirectory = Path.GetDirectoryName(alternativePath)
+                    };
+                    Process.Start(startInfo);
+                    
+                    // Update LastUsed time and persist it
+                    SelectedApp.LastUsed = DateTime.Now;
+                    _settings.LastUsedTimes[SelectedApp.ExecutablePath] = SelectedApp.LastUsed;
+                    _settings.ForceSave();
+                    
+                    // If sorted by last used, refresh the sort
+                    if (SelectedSortOption == "Last Used")
+                    {
+                        ApplySort();
+                    }
+                    
+                    // Immediately check running applications after launching
+                    UpdateRunningApplications();
+                    
+                    StatusMessage = $"Launched {SelectedApp.Name} (alternate executable)";
+                }
+                else
+                {
+                    StatusMessage = $"Alternative executable not found: {alternativePath}";
                 }
             }
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Error updating backup folders after name change: {ex.Message}");
+            Debug.WriteLine($"Error launching alternative executable 1: {ex.Message}");
+            StatusMessage = $"Error launching alternative executable: {ex.Message}";
         }
     }
     
-    /// <summary>
-    /// Ensures backup paths match the current app name when loading an app
-    /// </summary>
+    [RelayCommand]
+    private void LaunchAlternExec2()
+    {
+        if (SelectedApp == null)
+            return;
+            
+        try
+        {
+            // Find the matching known game
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            if (knownGame != null && !string.IsNullOrEmpty(knownGame.AlternExec2))
+            {
+                string alternativePath = Path.Combine(SelectedApp.Path, knownGame.AlternExec2);
+                
+                if (File.Exists(alternativePath))
+                {
+                    // Launch the alternative executable
+                    ProcessStartInfo startInfo = new ProcessStartInfo(alternativePath)
+                    {
+                        UseShellExecute = true,
+                        WorkingDirectory = Path.GetDirectoryName(alternativePath)
+                    };
+                    Process.Start(startInfo);
+                    
+                    // Update LastUsed time and persist it
+                    SelectedApp.LastUsed = DateTime.Now;
+                    _settings.LastUsedTimes[SelectedApp.ExecutablePath] = SelectedApp.LastUsed;
+                    _settings.ForceSave();
+                    
+                    // If sorted by last used, refresh the sort
+                    if (SelectedSortOption == "Last Used")
+                    {
+                        ApplySort();
+                    }
+                    
+                    // Immediately check running applications after launching
+                    UpdateRunningApplications();
+                    
+                    StatusMessage = $"Launched {SelectedApp.Name} (alternate executable 2)";
+                }
+                else
+                {
+                    StatusMessage = $"Alternative executable 2 not found: {alternativePath}";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error launching alternative executable 2: {ex.Message}");
+            StatusMessage = $"Error launching alternative executable 2: {ex.Message}";
+        }
+    }
+    
+    [RelayCommand]
+    private void OpenStorePage()
+    {
+        if (SelectedApp == null)
+            return;
+            
+        try
+        {
+            // Find the matching known game
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            if (knownGame != null && !string.IsNullOrEmpty(knownGame.Store))
+            {
+                // Open the store page
+                ProcessStartInfo startInfo = new ProcessStartInfo(knownGame.Store)
+                {
+                    UseShellExecute = true
+                };
+                Process.Start(startInfo);
+                
+                StatusMessage = $"Opened store page for {SelectedApp.Name}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error opening store page: {ex.Message}");
+            StatusMessage = $"Error opening store page: {ex.Message}";
+        }
+    }
+    
+    [RelayCommand]
+    private void UninstallApp()
+    {
+        if (SelectedApp == null)
+            return;
+            
+        try
+        {
+            // Find the matching known game
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            if (knownGame != null && !string.IsNullOrEmpty(knownGame.Uninstall))
+            {
+                // Launch the uninstall process
+                ProcessStartInfo startInfo = new ProcessStartInfo(knownGame.Uninstall)
+                {
+                    UseShellExecute = true
+                };
+                Process.Start(startInfo);
+                
+                StatusMessage = $"Started uninstall process for {SelectedApp.Name}";
+            }
+            else
+            {
+                // Try generic Windows uninstall approach
+                ProcessStartInfo startInfo = new ProcessStartInfo("control.exe", "appwiz.cpl")
+                {
+                    UseShellExecute = true
+                };
+                Process.Start(startInfo);
+                
+                StatusMessage = $"Opened Programs and Features for {SelectedApp.Name}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error uninstalling application: {ex.Message}");
+            StatusMessage = $"Error starting uninstall: {ex.Message}";
+        }
+    }
+    
+    // Properties for alternative executable menu text
+    public string AlternExec1MenuText
+    {
+        get
+        {
+            if (SelectedApp == null)
+                return "Launch Alternative";
+                
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            if (knownGame != null && !string.IsNullOrEmpty(knownGame.AlternExec1))
+            {
+                string fileName = Path.GetFileNameWithoutExtension(knownGame.AlternExec1);
+                return $"Launch {fileName}";
+            }
+            
+            return "Launch Alternative";
+        }
+    }
+    
+    public string AlternExec2MenuText
+    {
+        get
+        {
+            if (SelectedApp == null)
+                return "Launch Alternative 2";
+                
+            var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                string.Equals(g.Executable, System.IO.Path.GetFileName(SelectedApp.ExecutablePath), StringComparison.OrdinalIgnoreCase) ||
+                (string.Equals(g.Name, SelectedApp.Name, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(g.Name)) ||
+                (!string.IsNullOrEmpty(g.GameFolder) && (SelectedApp.Path.Contains(g.GameFolder, StringComparison.OrdinalIgnoreCase) ||
+                    System.IO.Path.GetFileName(SelectedApp.Path).Equals(g.GameFolder, StringComparison.OrdinalIgnoreCase))));
+                    
+            if (knownGame != null && !string.IsNullOrEmpty(knownGame.AlternExec2))
+            {
+                string fileName = Path.GetFileNameWithoutExtension(knownGame.AlternExec2);
+                return $"Launch {fileName}";
+            }
+            
+            return "Launch Alternative 2";
+        }
+    }
+    
+    // Ensures that backup paths for an app match its new name by updating the backup folder names
     private void EnsureBackupPathsMatchAppName(ApplicationInfo app, string originalName)
     {
         try
         {
-            // Skip if there's no backup history for this app or names are the same
-            if (!_settings.BackupHistory.TryGetValue(app.ExecutablePath, out var backupList) || 
-                backupList.Count == 0 || 
-                originalName == app.Name)
+            if (string.IsNullOrEmpty(originalName) || originalName == app.Name)
                 return;
                 
-            string originalSanitizedName = SanitizePathName(originalName);
-            string currentSanitizedName = SanitizePathName(app.Name);
+            // Original name sanitized
+            string sanitizedOldName = SanitizePathName(originalName);
             
-            // Skip if sanitized names are identical (would result in same paths)
-            if (originalSanitizedName == currentSanitizedName)
+            // New name sanitized
+            string sanitizedNewName = SanitizePathName(app.Name);
+            
+            if (sanitizedOldName == sanitizedNewName)
+                return; // No change needed
+                
+            // Folder locations
+            string oldBackupFolder = Path.Combine(_backupRootFolder, sanitizedOldName);
+            string newBackupFolder = Path.Combine(_backupRootFolder, sanitizedNewName);
+            
+            // Check if the old folder exists
+            if (!Directory.Exists(oldBackupFolder))
                 return;
                 
-            // Check if we need to handle physical folder renaming
-            bool originalFolderExists = Directory.Exists(Path.Combine(_backupRootFolder, originalSanitizedName));
-            bool currentFolderExists = Directory.Exists(Path.Combine(_backupRootFolder, currentSanitizedName));
-            
-            // Option 1: If original folder exists but current doesn't, move it
-            if (originalFolderExists && !currentFolderExists)
+            // Create the new directory if needed
+            if (!Directory.Exists(newBackupFolder))
             {
-                try
+                Directory.CreateDirectory(newBackupFolder);
+            }
+            
+            // Move all backup folders from old location to new location
+            foreach (var backupInfo in app.BackupHistory.ToList()) // ToList to avoid collection modified during iteration issues
+            {
+                if (backupInfo.BackupPath.StartsWith(oldBackupFolder))
                 {
-                    // Attempt to move the physical directory
-                    Directory.Move(
-                        Path.Combine(_backupRootFolder, originalSanitizedName), 
-                        Path.Combine(_backupRootFolder, currentSanitizedName));
+                    // Get the relative path (timestamp subfolder)
+                    string timestamp = Path.GetFileName(backupInfo.BackupPath);
                     
-                    // Update the paths in backup history
-                    foreach (var backup in backupList)
+                    // Create new path
+                    string newPath = Path.Combine(newBackupFolder, timestamp);
+                    
+                    // If backup folder with same timestamp doesn't exist at new location, move it
+                    if (!Directory.Exists(newPath) && Directory.Exists(backupInfo.BackupPath))
                     {
-                        backup.BackupPath = backup.BackupPath.Replace(
-                            Path.Combine(_backupRootFolder, originalSanitizedName),
-                            Path.Combine(_backupRootFolder, currentSanitizedName));
+                        try
+                        {                            // Copy the directory to the new location
+                            int filesCopied = 0;
+                            CopyDirectory(backupInfo.BackupPath, newPath, ref filesCopied);
+                            
+                            // Update path in the backup info
+                            backupInfo.BackupPath = newPath;
+                            
+                            // Update in settings as well
+                            if (_settings.BackupHistory.TryGetValue(app.ExecutablePath, out var backupList))
+                            {
+                                foreach (var backup in backupList)
+                                {
+                                    if (backup.BackupPath.StartsWith(oldBackupFolder))
+                                    {
+                                        backup.BackupPath = backup.BackupPath.Replace(oldBackupFolder, newBackupFolder);
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error moving backup from {backupInfo.BackupPath} to {newPath}: {ex.Message}");
+                        }
                     }
-                    
-                    // Update paths in the UI collection too
-                    foreach (var backup in app.BackupHistory)
-                    {
-                        backup.BackupPath = backup.BackupPath.Replace(
-                            Path.Combine(_backupRootFolder, originalSanitizedName),
-                            Path.Combine(_backupRootFolder, currentSanitizedName));
-                    }
-                    
-                    // Save the updated paths to settings
-                    _settings.Save();
                 }
-                catch (Exception ex)
+            }
+            
+            // Try to remove old folder if empty
+            try
+            {
+                if (Directory.Exists(oldBackupFolder) && !Directory.EnumerateFileSystemEntries(oldBackupFolder).Any())
                 {
-                    Debug.WriteLine($"Failed to rename backup folder during loading: {ex.Message}");
+                    Directory.Delete(oldBackupFolder);
                 }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error deleting old backup folder {oldBackupFolder}: {ex.Message}");
             }
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Error ensuring backup paths match app name: {ex.Message}");
+            Debug.WriteLine($"Error updating backup paths for {app.Name}: {ex.Message}");
         }
+    }
+    
+    // Updates backup folder paths when an app is renamed
+    private void UpdateBackupFoldersAfterNameChange(string executablePath, string oldName, string newName)
+    {
+        // Get the app being renamed
+        var app = AllInstalledApps.FirstOrDefault(a => a.ExecutablePath == executablePath);
+        if (app == null)
+            return;
+            
+        EnsureBackupPathsMatchAppName(app, oldName);
+        
+        // Save settings to persist the changes to backup paths
+        _settings.Save();
     }
 }
  

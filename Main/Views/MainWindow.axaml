@@ -470,23 +470,103 @@
                                 <ColumnDefinition Width="Auto"/> <!-- Left buttons section -->
                                 <ColumnDefinition Width="*"/> <!-- Spacer -->
                                 <ColumnDefinition Width="Auto"/> <!-- Right profile section -->
-                            </Grid.ColumnDefinitions>                            <!-- Action buttons on the left -->
-                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                <Button Command="{Binding LaunchAppCommand}"
-                                        IsEnabled="{Binding !!SelectedApp}"
-                                        Background="#FF9800"
-                                        Foreground="{DynamicResource TextColor}"
-                                        Padding="15,6"
-                                        Height="32"
-                                        CornerRadius="4"
-                                        VerticalAlignment="Center"
-                                        HorizontalAlignment="Left">
-                                    <StackPanel Orientation="Horizontal">
-                                        <PathIcon Data="M0,0 L8,8 L0,16 M2,0 L10,8 L2,16" Height="12" Width="12" Margin="0,0,5,0"/>
-                                        <TextBlock Text="Launch"/>
-                                    </StackPanel>
-                                </Button>
-
+                            </Grid.ColumnDefinitions>                            <!-- Action buttons on the left -->                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                <!-- Split Launch Button with Dropdown -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    
+                                    <!-- Main Launch Button -->
+                                    <Button Grid.Column="0"
+                                            Command="{Binding LaunchAppCommand}"
+                                            IsEnabled="{Binding !!SelectedApp}"
+                                            Background="#FF9800"
+                                            Foreground="{DynamicResource TextColor}"
+                                            Padding="15,6"
+                                            Height="32"
+                                            CornerRadius="4, 0, 0, 4"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Left">
+                                        <StackPanel Orientation="Horizontal">
+                                            <PathIcon Data="M0,0 L8,8 L0,16 M2,0 L10,8 L2,16" Height="12" Width="12" Margin="0,0,5,0"/>
+                                            <TextBlock Text="Launch"/>
+                                        </StackPanel>
+                                    </Button>
+                                    
+                                    <!-- Dropdown Button -->
+                                    <Button Grid.Column="1"
+                                            IsEnabled="{Binding !!SelectedApp}"
+                                            Background="#FF9800"
+                                            Foreground="{DynamicResource TextColor}"
+                                            Padding="5,6"
+                                            Height="32"
+                                            CornerRadius="0, 4, 4, 0"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Left">
+                                        <PathIcon Data="M 0,0 L 6,6 L 12,0" Height="6" Width="12"/>
+                                        <Button.Flyout>
+                                            <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                                                <!-- Regular Launch Option -->
+                                                <MenuItem Header="Launch Game" 
+                                                          Command="{Binding LaunchAppCommand}">
+                                                    <MenuItem.Icon>
+                                                        <PathIcon Data="M0,0 L8,8 L0,16 M2,0 L10,8 L2,16" Height="12" Width="12"/>
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                  <!-- Steam Launch Option -->
+                                                <MenuItem Header="Launch from Steam" 
+                                                          Command="{Binding LaunchFromSteamCommand}"
+                                                          IsVisible="{Binding HasSteamLaunchOption}">
+                                                    <MenuItem.Icon>
+                                                        <Image Source="/Assets/icon/dark/steam.png" Width="16" Height="16"/>
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                
+                                                <!-- Alternative Executable 1 -->
+                                                <MenuItem Header="{Binding AlternExec1MenuText}" 
+                                                          Command="{Binding LaunchAlternExec1Command}"
+                                                          IsVisible="{Binding HasAlternExec1}">
+                                                    <MenuItem.Icon>
+                                                        <PathIcon Data="M0,0 L8,8 L0,16 M2,0 L10,8 L2,16" Height="12" Width="12"/>
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                
+                                                <!-- Alternative Executable 2 -->
+                                                <MenuItem Header="{Binding AlternExec2MenuText}" 
+                                                          Command="{Binding LaunchAlternExec2Command}"
+                                                          IsVisible="{Binding HasAlternExec2}">
+                                                    <MenuItem.Icon>
+                                                        <PathIcon Data="M0,0 L8,8 L0,16 M2,0 L10,8 L2,16" Height="12" Width="12"/>
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                
+                                                <!-- Separator -->
+                                                <Separator/>
+                                                
+                                                <!-- Open Store Page -->
+                                                <MenuItem Header="Open in Store" 
+                                                          Command="{Binding OpenStorePageCommand}"
+                                                          IsVisible="{Binding HasStorePage}">
+                                                    <MenuItem.Icon>
+                                                        <PathIcon Data="M10,4V6H14V16H16V4H10M7,3H5C3.9,3 3,3.9 3,5V21H5V6H7V3Z" Height="16" Width="16"/>
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                                
+                                                <!-- Uninstall Option -->
+                                                <MenuItem Header="Uninstall" 
+                                                          Command="{Binding UninstallAppCommand}"
+                                                          IsVisible="{Binding HasUninstallOption}">
+                                                    <MenuItem.Icon>
+                                                        <PathIcon Data="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z" Height="16" Width="16"/>
+                                                    </MenuItem.Icon>
+                                                </MenuItem>
+                                            </MenuFlyout>
+                                        </Button.Flyout>
+                                    </Button>
+                                </Grid>
+                                
                                 <!-- Toggle between Edit and Confirm buttons based on IsEditing state -->
                                 <Button Command="{Binding EditAppCommand}"
                                         IsEnabled="{Binding !!SelectedApp}"

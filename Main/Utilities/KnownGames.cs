@@ -17,14 +17,24 @@ namespace SaveVaultApp.Utilities
                 Name = "Cyberpunk 2077",
                 GameFolder = "Cyberpunk 2077",
                 Executable = "REDprelauncher.exe",
-                SavePath = "%USERPROFILE%\\Saved Games\\CD Projekt Red\\Cyberpunk 2077"
+                SavePath = "%USERPROFILE%\\Saved Games\\CD Projekt Red\\Cyberpunk 2077",
+                AlternExec1 = "bin\\x64\\Cyberpunk2077.exe",
+                Platform = "Steam",
+                LaunchFromSteam = "steam://run/1091500",
+                Uninstall = "steam://uninstall/1091500",
+                Store = "steam://store/1091500"
             },            
             new KnownGameInfo
             {
                 Name = "Abiotic Factor",
                 GameFolder = "AbioticFactor",
                 Executable = "AbioticFactor\\Binaries\\Win64\\AbioticFactor-Win64-Shipping.exe",
-                SavePath = "%USERPROFILE%\\AppData\\Local\\AbioticFactor\\Saved"
+                SavePath = "%USERPROFILE%\\AppData\\Local\\AbioticFactor\\Saved",
+                AlternExec1 = "AbioticFactor\\AbioticFactor.exe",
+                Platform = "Steam",
+                LaunchFromSteam = "steam://run/2221530",
+                Uninstall = "steam://uninstall/2221530",
+                Store = "steam://store/2221530"
             }
             // Additional games can be added here
         };

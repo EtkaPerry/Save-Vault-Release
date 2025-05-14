@@ -100,6 +100,18 @@ public class Settings
         }
     }
 
+    // Sidebar visibility setting
+    private bool _isSidebarVisible = true;
+    public bool IsSidebarVisible
+    {
+        get => _isSidebarVisible;
+        set
+        {
+            _isSidebarVisible = value;
+            QueueSave();
+        }
+    }
+
     private bool _hiddenGamesExpanded = true;
     public bool HiddenGamesExpanded
     {

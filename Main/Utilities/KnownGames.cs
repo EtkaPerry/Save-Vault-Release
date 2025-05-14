@@ -32,9 +32,9 @@ namespace SaveVaultApp.Utilities
                 SavePath = "%USERPROFILE%\\AppData\\Local\\AbioticFactor\\Saved",
                 AlternExec1 = "AbioticFactor\\AbioticFactor.exe",
                 Platform = "Steam",
-                LaunchFromSteam = "steam://run/2221530",
-                Uninstall = "steam://uninstall/2221530",
-                Store = "steam://store/2221530"
+                LaunchFromSteam = "steam://run/427410",
+                Uninstall = "steam://uninstall/427410",
+                Store = "steam://store/427410"
             }
             // Additional games can be added here
         };

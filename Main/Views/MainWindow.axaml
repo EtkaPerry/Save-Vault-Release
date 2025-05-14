@@ -47,8 +47,7 @@
                     <MenuItem Header="Log Viewer" Command="{Binding OpenLogViewerCommand}"/>
                 </MenuItem>
             </Menu>
-            
-            <!-- Window Title - This area will be used for window dragging -->
+              <!-- Window Title - This area will be used for window dragging -->
             <Border Grid.Column="1" Name="DragRegion" Background="Transparent">
                 <TextBlock Text="Save Vault" VerticalAlignment="Center" HorizontalAlignment="Center" />
             </Border>
@@ -107,18 +106,52 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </StackPanel>
-        </Grid>
-
-        <!-- Main Content -->
+        </Grid>        <!-- Main Content -->
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="20*" />
+                <!-- Dynamic sidebar width based on IsSidebarVisible property -->
+                <ColumnDefinition Width="{Binding IsSidebarVisible, Converter={x:Static utils:BoolToGridLengthConverter.Instance}, ConverterParameter='20*,0'}" />
                 <ColumnDefinition Width="80*" />
-            </Grid.ColumnDefinitions>
+            </Grid.ColumnDefinitions>            <!-- Sidebar Toggle Button - Floating button on the edge -->
+            <Border Grid.Column="{Binding IsSidebarVisible, Converter={x:Static utils:BoolToColumnConverter.Instance}}" 
+                   HorizontalAlignment="{Binding IsSidebarVisible, Converter={x:Static utils:BoolToAlignmentConverter.Instance}}"
+                   VerticalAlignment="Center" 
+                   Background="{DynamicResource ListItemBackground}"
+                   CornerRadius="{Binding IsSidebarVisible, Converter={x:Static utils:BoolToCornerRadiusConverter.Instance}, ConverterParameter='0,3,3,0:3,0,0,3'}"
+                   Width="16" Height="48"
+                   ZIndex="100"
+                   Margin="{Binding IsSidebarVisible, Converter={x:Static utils:BoolToMarginConverter.Instance}, ConverterParameter='0,0,-1,0:0,0,0,0'}"
+                   BoxShadow="2 0 10 0 #20000000, -2 0 10 0 #20000000">
+                <Button Background="Transparent" 
+                       BorderThickness="0"
+                       Padding="0"
+                       Width="16" Height="48" 
+                       Command="{Binding ToggleSidebarCommand}"
+                       ToolTip.Tip="{Binding IsSidebarVisible, Converter={x:Static utils:BoolToSidebarTooltipConverter.Instance}}">
+                    <Panel>
+                        <!-- Arrow icon -->
+                        <Path Stroke="{DynamicResource TextColor}" 
+                             StrokeThickness="1.2" 
+                             VerticalAlignment="Center" 
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,0">
+                            <Path.Data>
+                                <Binding Path="IsSidebarVisible" Converter="{x:Static utils:BoolToSidebarPathConverter.Instance}"/>
+                            </Path.Data>
+                        </Path>
+                    </Panel>
+                </Button>
+            </Border>
 
             <!-- Left Panel -->
-            <Border Grid.Column="0" Background="{DynamicResource SidebarBackground}" Padding="10">
-                <DockPanel>                    <StackPanel DockPanel.Dock="Top">                        <!-- Home section with separate logo and home buttons -->                        <Grid Margin="0,0,0,15">
+            <Border Grid.Column="0" Background="{DynamicResource SidebarBackground}" Padding="10"
+                   IsVisible="{Binding IsSidebarVisible}">
+                <Border.Transitions>
+                    <Transitions>
+                        <DoubleTransition Property="Opacity" Duration="0:0:0.2" Easing="CubicEaseOut"/>
+                    </Transitions>
+                </Border.Transitions>
+                <DockPanel><StackPanel DockPanel.Dock="Top">                        <!-- Home section with separate logo and home buttons -->                        <Grid Margin="0,0,0,15">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -1631,7 +1664,9 @@
                                                                 BorderThickness="0"
                                                                 Background="Transparent"/>
                                                     </Grid>
-                                                </Border>                                                <Border Background="{DynamicResource TextBoxBackground}"
+                                                </Border>
+
+                                                <Border Background="{DynamicResource TextBoxBackground}"
                                                         CornerRadius="6"
                                                         Padding="12,8">
                                                     <Grid ColumnDefinitions="Auto,*">
@@ -1718,9 +1753,11 @@
                                                     </Button>
                                                 </Grid>
                                             </StackPanel>
-                                        </TabItem>                                    </TabControl>
+                                        </TabItem>
+                                    </TabControl>
                                 </Grid>
-                            </Border>                        </Border>
+                            </Border>
+                        </Border>
                         
                         <!-- Profile Panel -->
                         <Border IsVisible="{Binding IsProfilePanelOpen}"

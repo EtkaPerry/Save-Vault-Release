@@ -104,6 +104,21 @@ public partial class MainWindowViewModel : ViewModelBase
         get => _isHoveringNextSave;
         set => this.RaiseAndSetIfChanged(ref _isHoveringNextSave, value);
     }
+
+    private bool _isSidebarVisible;
+    public bool IsSidebarVisible
+    {
+        get => _isSidebarVisible;
+        set 
+        {
+            this.RaiseAndSetIfChanged(ref _isSidebarVisible, value);
+            if (_settings != null)
+            {
+                _settings.IsSidebarVisible = value;
+                _settings.Save();
+            }
+        }
+    }
       private bool _isLoginPopupOpen;
     public bool IsLoginPopupOpen
     {
@@ -205,6 +220,7 @@ public partial class MainWindowViewModel : ViewModelBase
         
         _selectedSortOption = _settings.SortOption;
         _isHiddenGamesExpanded = _settings.HiddenGamesExpanded;
+        _isSidebarVisible = _settings.IsSidebarVisible; // Initialize sidebar visibility
         
         // Initialize update service
         var updateService = UpdateService.Instance;
@@ -3883,8 +3899,7 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 Directory.CreateDirectory(newBackupFolder);
             }
-            
-            // Move all backup folders from old location to new location
+              // Move all backup folders from old location to new location
             foreach (var backupInfo in app.BackupHistory.ToList()) // ToList to avoid collection modified during iteration issues
             {
                 if (backupInfo.BackupPath.StartsWith(oldBackupFolder))
@@ -3957,6 +3972,14 @@ public partial class MainWindowViewModel : ViewModelBase
         
         // Save settings to persist the changes to backup paths
         _settings.Save();
+    }
+    
+    // Toggle sidebar visibility command
+    [RelayCommand]
+    private void ToggleSidebar()
+    {
+        IsSidebarVisible = !IsSidebarVisible;
+        LoggingService.Instance.Info($"Sidebar visibility toggled to {IsSidebarVisible}");
     }
 }
  

@@ -217,3 +217,222 @@ public class BoolToStringConverter : IValueConverter
         throw new NotImplementedException();
     }
 }
+
+public class BoolToGridLengthConverter : IValueConverter
+{
+    public static readonly BoolToGridLengthConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is bool isVisible && parameter is string valueStr)
+        {
+            var values = valueStr.Split(',');
+            if (values.Length == 2)
+            {
+                // Use the appropriate string based on the boolean value
+                var gridLengthStr = isVisible ? values[0].Trim() : values[1].Trim();
+                
+                // Handle specific values
+                if (gridLengthStr == "0")
+                {
+                    return new Avalonia.Controls.GridLength(0);
+                }
+                else if (gridLengthStr.EndsWith("*"))
+                {
+                    // Handle star sizing
+                    string numPart = gridLengthStr.TrimEnd('*');
+                    double value1 = 1;
+                    if (!string.IsNullOrEmpty(numPart))
+                    {
+                        double.TryParse(numPart, out value1);
+                    }
+                    return new Avalonia.Controls.GridLength(value1, Avalonia.Controls.GridUnitType.Star);
+                }
+                else if (double.TryParse(gridLengthStr, out double pixelValue))
+                {
+                    return new Avalonia.Controls.GridLength(pixelValue);
+                }
+            }
+        }
+        
+        // Default to 1* if something went wrong
+        return new Avalonia.Controls.GridLength(1, Avalonia.Controls.GridUnitType.Star);
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class BoolToOpacityConverter : IValueConverter
+{
+    public static readonly BoolToOpacityConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        return value is bool isVisible && isVisible ? 1.0 : 0.0;
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class BoolToWidthConverter : IMultiValueConverter
+{
+    public static readonly BoolToWidthConverter Instance = new();
+
+    public object? Convert(IList<object?> values, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (values.Count >= 2 && values[0] is bool isVisible && values[1] is double width)
+        {
+            return isVisible ? Double.NaN : 0; // NaN means use measured width, 0 means collapse
+        }
+        
+        return Double.NaN;
+    }
+}
+
+public class BoolToSidebarPathConverter : IValueConverter
+{
+    public static readonly BoolToSidebarPathConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        // When sidebar is visible, show icon to hide it (left arrow)
+        // When sidebar is hidden, show icon to show it (right arrow)
+        return value is bool isVisible && isVisible 
+            ? Geometry.Parse("M 10,0 L 0,5 L 10,10") // Left arrow (hide)
+            : Geometry.Parse("M 0,0 L 10,5 L 0,10"); // Right arrow (show)
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class BoolToSidebarTooltipConverter : IValueConverter
+{
+    public static readonly BoolToSidebarTooltipConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        return value is bool isVisible && isVisible ? "Hide sidebar" : "Show sidebar";
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class BoolToColumnConverter : IValueConverter
+{
+    public static readonly BoolToColumnConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        // When sidebar is visible, place button in column 0
+        // When sidebar is hidden, place button in column 1
+        return value is bool isVisible && isVisible ? 0 : 1;
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class BoolToAlignmentConverter : IValueConverter
+{
+    public static readonly BoolToAlignmentConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        // When sidebar is visible, button is on the right edge of sidebar
+        // When sidebar is hidden, button is on the left edge of main content
+        return value is bool isVisible && isVisible 
+            ? Avalonia.Layout.HorizontalAlignment.Right 
+            : Avalonia.Layout.HorizontalAlignment.Left;
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class BoolToCornerRadiusConverter : IValueConverter
+{
+    public static readonly BoolToCornerRadiusConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (parameter is string paramStr)
+        {
+            var parts = paramStr.Split(':');
+            if (parts.Length == 2)
+            {
+                var cornerRadiusStr = value is bool isVisible && isVisible ? parts[0] : parts[1];
+                if (double.TryParse(cornerRadiusStr, out var uniformRadius))
+                {
+                    return new CornerRadius(uniformRadius);
+                }
+                
+                var radiusValues = cornerRadiusStr.Split(',');
+                if (radiusValues.Length == 4 &&
+                    double.TryParse(radiusValues[0], out var topLeft) &&
+                    double.TryParse(radiusValues[1], out var topRight) &&
+                    double.TryParse(radiusValues[2], out var bottomRight) &&
+                    double.TryParse(radiusValues[3], out var bottomLeft))
+                {
+                    return new CornerRadius(topLeft, topRight, bottomRight, bottomLeft);
+                }
+            }
+        }
+        
+        return new CornerRadius(3);
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}
+
+public class BoolToMarginConverter : IValueConverter
+{
+    public static readonly BoolToMarginConverter Instance = new();
+
+    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (parameter is string paramStr)
+        {
+            var parts = paramStr.Split(':');
+            if (parts.Length == 2)
+            {
+                var marginStr = value is bool isVisible && isVisible ? parts[0] : parts[1];
+                
+                var marginValues = marginStr.Split(',');
+                if (marginValues.Length == 4 &&
+                    double.TryParse(marginValues[0], out var left) &&
+                    double.TryParse(marginValues[1], out var top) &&
+                    double.TryParse(marginValues[2], out var right) &&
+                    double.TryParse(marginValues[3], out var bottom))
+                {
+                    return new Thickness(left, top, right, bottom);
+                }
+            }
+        }
+        
+        return new Thickness(0);
+    }
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}

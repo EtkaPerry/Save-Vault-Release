@@ -131,6 +131,19 @@
                             <ToggleSwitch IsChecked="{Binding StartSaveEnabled}"/>
                         </StackPanel>
 
+                        <!-- Change Detection toggle -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Change Detection:" 
+                                     VerticalAlignment="Center" 
+                                     Width="120"/>
+                            <ToggleSwitch IsChecked="{Binding ChangeDetectionEnabled}"/>
+                            <TextBlock Text="Only backup when files change" 
+                                     VerticalAlignment="Center" 
+                                     Margin="10,0,0,0"
+                                     Opacity="0.7"
+                                     FontStyle="Italic"/>
+                        </StackPanel>
+
                         <!-- Status message -->
                         <TextBlock Text="Changes are saved automatically" 
                                  HorizontalAlignment="Right"
@@ -370,7 +383,7 @@
                                            Foreground="White"
                                            Padding="15,8">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <PathIcon Data="M16,12L24,4L16,12L8,4L16,12M16,12L24,20L16,12L8,20L16,12M16,12L12,16L20,16L16,12Z"
+                                            <PathIcon Data="M16,12L24,4L16,12L8,4L16,12M16,12L24,20L16,12L8,20L16,12L12,16L20,16L16,12Z"
                                                      Width="16" Height="16"/>
                                             <TextBlock Text="Check for Updates"/>
                                         </StackPanel>

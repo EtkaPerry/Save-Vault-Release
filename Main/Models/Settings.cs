@@ -217,6 +217,18 @@ public class Settings
         }
     }
 
+    // Add change detection before backup setting
+    private bool _changeDetectionEnabled = true;
+    public bool ChangeDetectionEnabled
+    {
+        get => _changeDetectionEnabled;
+        set
+        {
+            _changeDetectionEnabled = value;
+            QueueSave();
+        }
+    }
+
     private DateTime _lastUpdateCheck = DateTime.MinValue;
     public DateTime LastUpdateCheck
     {
@@ -440,6 +452,18 @@ public class Settings
             _backupHistory = value;
             QueueSave();
         }
+    }
+    
+    // File state tracking for change detection
+    private Dictionary<string, Dictionary<string, string>> _lastFileStates = new();
+    public Dictionary<string, Dictionary<string, string>> LastFileStates
+    {
+        get => _lastFileStates;
+        set
+        {
+            _lastFileStates = value;
+            QueueSave();
+        }
     }    // Constructor that ensures this instance is the current static instance
     public Settings()
     {
@@ -527,6 +551,7 @@ public class Settings
             settings.KnownApplicationPaths ??= new();
             settings.AppSettings ??= new();
             settings.BackupHistory ??= new();
+            settings.LastFileStates ??= new();
 
             // Set default values for any unset properties
             if (string.IsNullOrEmpty(settings.SortOption))
@@ -551,6 +576,9 @@ public class Settings
             
             if (settings.UpdateCheckInterval <= 0)
                 settings.UpdateCheckInterval = 24;
+            
+            // Set default for change detection (on by default)
+            settings.ChangeDetectionEnabled = true;
 
             // Set this as the static instance
             _instance = settings;
@@ -767,6 +795,7 @@ public class Settings
         logger.Debug($"HiddenGamesExpanded: {HiddenGamesExpanded}");
         logger.Debug($"GlobalAutoSaveEnabled: {GlobalAutoSaveEnabled}");
         logger.Debug($"StartSaveEnabled: {StartSaveEnabled}");
+        logger.Debug($"ChangeDetectionEnabled: {ChangeDetectionEnabled}");
         logger.Debug($"AutoSaveInterval: {AutoSaveInterval}");
         logger.Debug($"MaxAutoSaves: {MaxAutoSaves}");
         logger.Debug($"MaxStartSaves: {MaxStartSaves}");
@@ -778,6 +807,60 @@ public class Settings
         logger.Debug($"HiddenApps count: {HiddenApps?.Count ?? 0}");
         logger.Debug($"AppSettings count: {AppSettings?.Count ?? 0}");
         logger.Debug($"BackupHistory count: {BackupHistory?.Count ?? 0}");
+        logger.Debug($"LastFileStates count: {LastFileStates?.Count ?? 0}");
+    }
+    
+    // File state tracking and change detection methods
+    
+    /// <summary>
+    /// Updates the stored state of files for a specific application
+    /// </summary>
+    /// <param name="appId">The application identifier</param>
+    /// <param name="fileStates">Dictionary of file paths and their hash/state</param>
+    public void UpdateFileStates(string appId, Dictionary<string, string> fileStates)
+    {
+        LastFileStates[appId] = fileStates;
+        QueueSave();
+    }
+    
+    /// <summary>
+    /// Compares the current file states with the previously stored states
+    /// </summary>
+    /// <param name="appId">The application identifier</param>
+    /// <param name="currentStates">Current file states (path->hash dictionary)</param>
+    /// <returns>True if changes are detected, false otherwise</returns>
+    public bool HasChanges(string appId, Dictionary<string, string> currentStates)
+    {
+        // If change detection is disabled, always return true to force backup
+        if (!ChangeDetectionEnabled)
+        {
+            return true;
+        }
+        
+        // If we don't have previous states, it's a change
+        if (!LastFileStates.ContainsKey(appId))
+        {
+            return true;
+        }
+        
+        var previousStates = LastFileStates[appId];
+        
+        // If file count differs, something changed
+        if (previousStates.Count != currentStates.Count)
+        {
+            return true;
+        }
+        
+        // Check each file's state
+        foreach (var file in currentStates)
+        {
+            if (!previousStates.ContainsKey(file.Key) || previousStates[file.Key] != file.Value)
+            {
+                return true;  // File is new or changed
+            }
+        }
+        
+        return false;  // No changes detected
     }
     
     // Debug method to verify paths
@@ -909,6 +992,17 @@ public class AppSpecificSettings
         set
         {
             _maxStartSaves = value;
+            QueueSettingsSave();
+        }
+    }
+    
+    private bool _changeDetectionEnabled = true;
+    public bool ChangeDetectionEnabled
+    {
+        get => _changeDetectionEnabled;
+        set
+        {
+            _changeDetectionEnabled = value;
             QueueSettingsSave();
         }
     }

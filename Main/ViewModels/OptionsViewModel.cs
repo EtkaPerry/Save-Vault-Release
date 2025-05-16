@@ -96,6 +96,18 @@ public partial class OptionsViewModel : ViewModelBase
         }
     }
 
+    private bool _changeDetectionEnabled;
+    public bool ChangeDetectionEnabled
+    {
+        get => _changeDetectionEnabled;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _changeDetectionEnabled, value);
+            _settings.ChangeDetectionEnabled = value;
+            SaveChanges();
+        }
+    }
+
     private int _maxAutoSaves;
     public int MaxAutoSaves
     {
@@ -186,6 +198,7 @@ public partial class OptionsViewModel : ViewModelBase
         _autoSaveInterval = _settings.AutoSaveInterval;
         _globalAutoSaveEnabled = _settings.GlobalAutoSaveEnabled;
         _startSaveEnabled = _settings.StartSaveEnabled;
+        _changeDetectionEnabled = _settings.ChangeDetectionEnabled;
         _maxAutoSaves = _settings.MaxAutoSaves;
         _maxStartSaves = _settings.MaxStartSaves;
         _selectedTheme = _settings.Theme ?? "System";

@@ -406,8 +406,7 @@ public partial class MainWindowViewModel : ViewModelBase
             Debug.WriteLine($"Error during automatic backup check: {ex.Message}");
         }
     }
-    
-    private void CreateBackup(ApplicationInfo app)
+      private void CreateBackup(ApplicationInfo app)
     {
         try
         {
@@ -422,6 +421,55 @@ public partial class MainWindowViewModel : ViewModelBase
 
             if (!shouldAutoSave)
                 return;
+
+            // Get all files in the save directory for change detection
+            var saveFiles = Directory.GetFiles(app.SavePath, "*", SearchOption.AllDirectories);
+            
+            // Check if change detection is enabled (global or app-specific setting)
+            bool changeDetectionEnabled = app.HasCustomSettings
+                ? app.CustomSettings.ChangeDetectionEnabled
+                : _settings.ChangeDetectionEnabled;
+                  // Use change detection if enabled
+            if (changeDetectionEnabled)
+            {
+                Debug.WriteLine($"Change detection enabled for {app.Name}, checking {saveFiles.Length} files...");                // Check if there are changes since last backup - pass app-specific settings if available
+                bool hasChanges = Utilities.FileChangeDetector.HaveFilesChanged(
+                    app.ExecutablePath, 
+                    saveFiles, 
+                    app.HasCustomSettings ? app.CustomSettings : null
+                );
+                  // Log the change detection result
+                Utilities.LoggingExtensions.LogChangeDetection(app.ExecutablePath, hasChanges, saveFiles.Length);
+                  // If no changes detected, reset the timer and skip the backup
+                if (!hasChanges)
+                {
+                    Debug.WriteLine($"No changes detected for {app.Name}, skipping backup and resetting timer");
+                    Services.LoggingService.Instance?.Debug($"Skipped backup for {app.Name} - No changes detected");
+                    
+                    // Reset the last backup time to 'now' to make the timer start over
+                    DateTime resetTime = DateTime.Now;
+                    app.LastBackupTime = resetTime;
+                    
+                    // Update timer in app data to ensure it persists
+                    _appData.LastBackupTimes[app.ExecutablePath] = resetTime;
+                    _appData.Save();
+                    
+                    // Update next save text immediately since we've reset the timer
+                    if (SelectedApp == app)
+                    {
+                        UpdateNextSaveText();
+                    }
+                    
+                    return;
+                }
+                
+                Debug.WriteLine($"Changes detected for {app.Name}, creating backup");
+                Services.LoggingService.Instance?.Debug($"Creating backup for {app.Name} - Changes detected in save files");
+            }
+            else
+            {
+                Debug.WriteLine($"Change detection disabled for {app.Name}, creating backup regardless of changes");
+            }
 
             // Get the effective max auto-saves setting
             int maxAutoSaves = app.HasCustomSettings
@@ -532,9 +580,32 @@ public partial class MainWindowViewModel : ViewModelBase
                         // Also update next save text immediately
                         UpdateNextSaveText();
                     }
-                    
-                    // Save settings *after* the backup history is updated (moved inside UI thread)
+                      // Save settings first to ensure backup history is persisted
                     _settings.Save();
+                    
+                    // Update file states for change detection after successful backup
+                    bool changeDetectionEnabled = app.HasCustomSettings
+                        ? app.CustomSettings.ChangeDetectionEnabled
+                        : _settings.ChangeDetectionEnabled;
+                        
+                    if (changeDetectionEnabled)
+                    {
+                        try
+                        {
+                            // Get all files in the save directory
+                            var saveFiles = Directory.GetFiles(app.SavePath, "*", SearchOption.AllDirectories);
+                            
+                            // Update the file states for future comparisons
+                            Utilities.FileChangeDetector.UpdateFileStates(app.ExecutablePath, saveFiles);
+                            
+                            // Force save settings again to ensure file states are persisted immediately
+                            _settings.Save();
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"Error updating file states: {ex.Message}");
+                        }
+                    }
                 });
             }
         }
@@ -2157,6 +2228,7 @@ public partial class MainWindowViewModel : ViewModelBase
                     EditableSavePath = folderPath[0].Path.LocalPath;
                 }
             }
+
         }
         catch (Exception ex)
         {
@@ -2601,8 +2673,7 @@ public partial class MainWindowViewModel : ViewModelBase
         SelectedApp.HasCustomSettings = !SelectedApp.HasCustomSettings;
         
         if (SelectedApp.HasCustomSettings)
-        {
-            // Initialize custom settings with current global settings
+        {            // Initialize custom settings with current global settings
             SelectedApp.CustomSettings = new AppSpecificSettings
             {
                 HasCustomSettings = true,
@@ -2610,7 +2681,8 @@ public partial class MainWindowViewModel : ViewModelBase
                 AutoSaveEnabled = _settings.GlobalAutoSaveEnabled,
                 StartSaveEnabled = _settings.StartSaveEnabled,
                 MaxAutoSaves = _settings.MaxAutoSaves,
-                MaxStartSaves = _settings.MaxStartSaves
+                MaxStartSaves = _settings.MaxStartSaves,
+                ChangeDetectionEnabled = _settings.ChangeDetectionEnabled // Initialize with global change detection setting
             };
             
             // Save to settings
@@ -3898,8 +3970,7 @@ public partial class MainWindowViewModel : ViewModelBase
             if (!Directory.Exists(newBackupFolder))
             {
                 Directory.CreateDirectory(newBackupFolder);
-            }
-              // Move all backup folders from old location to new location
+            }              // Move all backup folders from old location to new location
             foreach (var backupInfo in app.BackupHistory.ToList()) // ToList to avoid collection modified during iteration issues
             {
                 if (backupInfo.BackupPath.StartsWith(oldBackupFolder))
@@ -4080,8 +4151,7 @@ public class ApplicationInfo : ReactiveObject
         get => _backupHistory;
         set => this.RaiseAndSetIfChanged(ref _backupHistory, value);
     }
-    
-    private bool _autoBackupEnabled = true;
+      private bool _autoBackupEnabled = true;
     public bool AutoBackupEnabled
     {
         get => _hasCustomSettings ? _customSettings.AutoSaveEnabled : _autoBackupEnabled;
@@ -4094,6 +4164,23 @@ public class ApplicationInfo : ReactiveObject
             else
             {
                 this.RaiseAndSetIfChanged(ref _autoBackupEnabled, value);
+            }
+        }
+    }
+    
+    private bool _changeDetectionEnabled = true;
+    public bool ChangeDetectionEnabled
+    {
+        get => _hasCustomSettings ? _customSettings.ChangeDetectionEnabled : _changeDetectionEnabled;
+        set
+        {
+            if (_hasCustomSettings)
+            {
+                _customSettings.ChangeDetectionEnabled = value;
+            }
+            else
+            {
+                this.RaiseAndSetIfChanged(ref _changeDetectionEnabled, value);
             }
         }
     }

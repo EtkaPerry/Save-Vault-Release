@@ -921,12 +921,20 @@
                                                                 OnContent="Enabled" 
                                                                 OffContent="Disabled"/>
                                                 </StackPanel>
-                                                
-                                                <StackPanel Orientation="Horizontal">
+                                                  <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="Create save on launch:" 
                                                              VerticalAlignment="Center"
                                                              Width="150"/>
                                                     <ToggleSwitch IsChecked="{Binding SelectedApp.CustomSettings.StartSaveEnabled, Mode=TwoWay}"
+                                                                OnContent="Enabled" 
+                                                                OffContent="Disabled"/>
+                                                </StackPanel>
+                                                
+                                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                                    <TextBlock Text="Change detection:" 
+                                                             VerticalAlignment="Center"
+                                                             Width="150"/>
+                                                    <ToggleSwitch IsChecked="{Binding SelectedApp.CustomSettings.ChangeDetectionEnabled, Mode=TwoWay}"
                                                                 OnContent="Enabled" 
                                                                 OffContent="Disabled"/>
                                                 </StackPanel>

@@ -90,6 +90,16 @@ public partial class MainWindowViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _runningApps, value);
     }
     
+    [RelayCommand]
+    private void SelectRunningApp(ApplicationInfo app)
+    {
+        if (app != null)
+        {
+            SelectedApp = InstalledApps.FirstOrDefault(a => 
+                string.Equals(a.ExecutablePath, app.ExecutablePath, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+    
     private readonly Timer _processCheckTimer;
       private string _nextSaveText = string.Empty;
     public string NextSaveText
@@ -2449,7 +2459,11 @@ public partial class MainWindowViewModel : ViewModelBase
                 Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => 
                 {
                     RunningApps.Clear();
-                    foreach (var app in AllInstalledApps.Where(a => a.IsRunning).OrderBy(x => x.Name))
+                    foreach (var app in AllInstalledApps
+                        .Where(a => a.IsRunning)
+                        .Where(a => !a.ExecutablePath.Contains("SaveVault", StringComparison.OrdinalIgnoreCase) && 
+                                  !a.ExecutablePath.Contains("Save Vault", StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(x => x.Name))
                     {
                         RunningApps.Add(app);
                     }

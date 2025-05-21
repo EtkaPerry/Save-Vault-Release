@@ -96,13 +96,19 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Background="{DynamicResource ListItemBackground}" 
-                                   CornerRadius="3" 
-                                   Padding="4,1">
-                                <TextBlock Text="{Binding Name}" 
-                                          Foreground="#FF9800"
-                                          FontSize="10" />
-                            </Border>
+                            <Button Background="Transparent" 
+                                  BorderThickness="0" 
+                                  Padding="0" 
+                                  Command="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).SelectRunningAppCommand}"
+                                  CommandParameter="{Binding}">
+                                <Border Background="{DynamicResource ListItemBackground}" 
+                                       CornerRadius="3" 
+                                       Padding="4,1">
+                                    <TextBlock Text="{Binding Name}" 
+                                              Foreground="#FF9800"
+                                              FontSize="10" />
+                                </Border>
+                            </Button>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>

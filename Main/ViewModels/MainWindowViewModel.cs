@@ -1180,6 +1180,8 @@ public partial class MainWindowViewModel : ViewModelBase
                     if (knownGame != null && !string.IsNullOrWhiteSpace(knownGame.Name))
                     {
                         app.Name = knownGame.Name;
+                        // Store the known game ID for save carrier functionality
+                        app.KnownGameId = knownGame.Name;
                     }
                 }
 
@@ -1949,6 +1951,9 @@ public partial class MainWindowViewModel : ViewModelBase
         var result = Utilities.SaveLocationDetector.DetectSavePath(app);
         if (!string.IsNullOrEmpty(result.GameName))
         {
+            // Update KnownGameId from the detection result
+            app.KnownGameId = result.KnownGameId;
+            
             // Only update if not already customized by the user
             if (!_appData.CustomNames.ContainsKey(app.ExecutablePath) && !_settings.CustomNames.ContainsKey(app.ExecutablePath))
             {
@@ -3469,6 +3474,9 @@ public partial class MainWindowViewModel : ViewModelBase
       public IRelayCommand OpenLogViewerCommand => OpenLogViewerCommandImpl ??= new RelayCommand(OpenLogViewer);
     private IRelayCommand? OpenLogViewerCommandImpl;
     
+    public IRelayCommand OpenSaveCarrierCommand => OpenSaveCarrierCommandImpl ??= new RelayCommand(OpenSaveCarrier);
+    private IRelayCommand? OpenSaveCarrierCommandImpl;
+    
     private void OpenLogViewer()
     {
         var logViewerWindow = new Views.LogViewerWindow();
@@ -3479,6 +3487,38 @@ public partial class MainWindowViewModel : ViewModelBase
         else
         {
             logViewerWindow.Show();
+        }
+    }
+    
+    private void OpenSaveCarrier()
+    {
+        // Process all applications to ensure save paths are detected
+        var allAppsWithSavePaths = new List<ApplicationInfo>();
+        
+        foreach (var app in AllInstalledApps)
+        {
+            // Try to detect save path if it's missing or unknown
+            if (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown")
+            {
+                string detectedPath = DetectSavePath(app);
+                if (!string.IsNullOrEmpty(detectedPath) && detectedPath != "Unknown")
+                {
+                    app.SavePath = detectedPath;
+                }
+            }
+            
+            // Add all apps (they'll be filtered in SaveCarrierViewModel)
+            allAppsWithSavePaths.Add(app);
+        }
+        
+        var saveCarrierWindow = new Views.SaveCarrierWindow(_settings, allAppsWithSavePaths);
+        if (_mainWindow != null)
+        {
+            saveCarrierWindow.ShowDialog(_mainWindow);
+        }
+        else
+        {
+            saveCarrierWindow.Show();
         }
     }
     
@@ -4098,6 +4138,13 @@ public class ApplicationInfo : ReactiveObject
     { 
         get => _savePath; 
         set => this.RaiseAndSetIfChanged(ref _savePath, value);
+    }
+    
+    private string _knownGameId = string.Empty;
+    public string KnownGameId
+    {
+        get => _knownGameId;
+        set => this.RaiseAndSetIfChanged(ref _knownGameId, value);
     }
     
     private bool _isRunning;

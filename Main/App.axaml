@@ -16,6 +16,7 @@
       <Application.Resources>
         <ResourceDictionary>
             <utils:StringNotEmptyConverter x:Key="StringNotEmptyConverter"/>
+            <utils:IntEqualConverter x:Key="IntEqual"/>
             <ResourceDictionary.ThemeDictionaries>
                 <!-- Dark Theme Values - Using existing colors for dark mode -->
                 <ResourceDictionary x:Key="Dark">

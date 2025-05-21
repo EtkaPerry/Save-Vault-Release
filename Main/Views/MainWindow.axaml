@@ -45,6 +45,7 @@
                 <MenuItem Header="Options" Name="OptionsMenuItem"/>
                 <MenuItem Header="Tools">
                     <MenuItem Header="Log Viewer" Command="{Binding OpenLogViewerCommand}"/>
+                    <MenuItem Header="Save Carrier" Command="{Binding OpenSaveCarrierCommand}" ToolTip.Tip="Backup and transfer game saves between devices"/>
                 </MenuItem>
             </Menu>
               <!-- Window Title - This area will be used for window dragging -->

@@ -26,3 +26,23 @@ CREATE TABLE `user_settings` (
   UNIQUE KEY `unique_user_id` (`user_id`),
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- Database schema updates for website improvements
+ALTER TABLE `users` ADD COLUMN `profile_photo` VARCHAR(255) DEFAULT NULL;
+
+ALTER TABLE `users` ADD COLUMN `is_admin` TINYINT(1) DEFAULT 0;
+
+CREATE TABLE `login_history` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` INT UNSIGNED NOT NULL,
+  `login_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `ip_address` VARCHAR(45),
+  `browser` VARCHAR(255),
+  `os` VARCHAR(100),
+  `device_type` VARCHAR(50),
+  `country` VARCHAR(100),
+  `city` VARCHAR(100),
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -164,6 +164,22 @@ switch ($path) {
         }
         break;
         
+    case 'upload-photo':
+        if ($requestMethod === 'POST') {
+            handleProfilePhotoUpload($authHeader);
+        } else {
+            sendResponse(false, 'Method not allowed', null, 405);
+        }
+        break;
+        
+    case 'admin':
+        if ($requestMethod === 'GET') {
+            handleAdminRequest($authHeader);
+        } else {
+            sendResponse(false, 'Method not allowed', null, 405);
+        }
+        break;
+        
     default:
         sendResponse(false, 'Endpoint not found', null, 404);
 }
@@ -172,6 +188,9 @@ switch ($path) {
  * Handle user login
  */
 function handleLogin() {
+    // Include IP utility functions
+    require_once 'ip_utils.php';
+    
     // Get request body
     $data = json_decode(file_get_contents('php://input'), true);
     
@@ -191,7 +210,7 @@ function handleLogin() {
     $field = $isEmail ? 'email' : 'username';
     
     // Prepare and execute query
-    $stmt = $db->prepare("SELECT id, username, email, password FROM users WHERE $field = ?");
+    $stmt = $db->prepare("SELECT id, username, email, password, is_admin FROM users WHERE $field = ?");
     $stmt->bind_param('s', $usernameOrEmail);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -216,18 +235,49 @@ function handleLogin() {
     $issuedAt = time();
     $expire = $issuedAt + 3600; // 1 hour expiry
     
-    $token = generateJWT($user['id'], $user['username'], $issuedAt, $expire);
+    // Include is_admin status in the JWT token
+    $token = generateJWT($user['id'], $user['username'], $issuedAt, $expire, (bool)$user['is_admin']);
+    
+    // Get IP address
+    $ipAddress = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+    
+    // Get location data
+    $locationData = getLocationFromIP($ipAddress);
+    
+    // Get browser and device info
+    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+    $deviceInfo = parseUserAgent($userAgent);
     
     // Update last_login timestamp
-    $stmt = $db->prepare("UPDATE users SET last_login = NOW() WHERE id = ?");
-    $stmt->bind_param('i', $user['id']);
+    $stmt = $db->prepare("UPDATE users SET last_login = NOW(), last_login_ip = ? WHERE id = ?");
+    $stmt->bind_param('si', $ipAddress, $user['id']);
     $stmt->execute();
     
-    // Return response with token
+    // Log login details in login_history table
+    $stmt = $db->prepare("INSERT INTO login_history (user_id, ip_address, browser, os, device_type, country, city) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param('issssss', 
+        $user['id'], 
+        $ipAddress, 
+        $deviceInfo['browser'],
+        $deviceInfo['os'],
+        $deviceInfo['device_type'],
+        $locationData['country'],
+        $locationData['city']
+    );
+    $stmt->execute();
+    
+    // Return response with token and additional user info
     $responseData = [
         'token' => $token,
         'username' => $user['username'],
-        'email' => $user['email']
+        'email' => $user['email'],
+        'is_admin' => (bool)$user['is_admin'],
+        'login_info' => [
+            'ip' => $ipAddress,
+            'location' => $locationData['city'] . ', ' . $locationData['country'],
+            'browser' => $deviceInfo['browser'],
+            'device' => $deviceInfo['device_type'] . ' (' . $deviceInfo['os'] . ')'
+        ]
     ];
     
     sendResponse(true, 'Login successful', $responseData);
@@ -272,14 +322,25 @@ function handleRegistration() {
             sendResponse(false, 'Username must be at least 3 characters', null, 400);
             return;
         }
-        
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+          if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             sendResponse(false, 'Invalid email format', null, 400);
             return;
         }
         
         if (strlen($password) < 8) {
             sendResponse(false, 'Password must be at least 8 characters', null, 400);
+            return;
+        }
+        
+        // Check for at least one uppercase letter
+        if (!preg_match('/[A-Z]/', $password)) {
+            sendResponse(false, 'Password must contain at least one uppercase letter', null, 400);
+            return;
+        }
+        
+        // Check for at least one number
+        if (!preg_match('/[0-9]/', $password)) {
+            sendResponse(false, 'Password must contain at least one number', null, 400);
             return;
         }
         
@@ -449,6 +510,22 @@ function handleGetUserData($authHeader) {
     
     global $db;
     
+    // Get user information
+    $stmt = $db->prepare("SELECT 
+                         username,
+                         email,
+                         profile_photo,
+                         is_admin, 
+                         created_at,
+                         last_login,
+                         last_login_ip
+                         FROM users 
+                         WHERE id = ?");
+    $stmt->bind_param('i', $userData->userId);
+    $stmt->execute();
+    $userResult = $stmt->get_result();
+    $userInfo = $userResult->fetch_assoc();
+    
     // Get user settings
     $stmt = $db->prepare("SELECT 
                           auto_sync, 
@@ -486,9 +563,45 @@ function handleGetUserData($authHeader) {
             'emailNotifications' => (bool)$settingsRow['email_notifications']
         ];
     }
-      // Prepare response - no cloud saves for now
+    
+    // Get login history
+    $stmt = $db->prepare("SELECT 
+                        login_time,
+                        ip_address, 
+                        browser,
+                        os,
+                        device_type,
+                        country,
+                        city
+                        FROM login_history 
+                        WHERE user_id = ? 
+                        ORDER BY login_time DESC
+                        LIMIT 10");
+    $stmt->bind_param('i', $userData->userId);
+    $stmt->execute();
+    $loginResult = $stmt->get_result();
+    
+    $loginHistory = [];
+    while ($row = $loginResult->fetch_assoc()) {
+        $loginHistory[] = $row;
+    }
+    
+    // Prepare user object
+    $userObject = [
+        'username' => $userInfo['username'],
+        'email' => $userInfo['email'],
+        'is_admin' => (bool)$userInfo['is_admin'],
+        'profile_photo' => $userInfo['profile_photo'],
+        'created_at' => $userInfo['created_at'],
+        'last_login' => $userInfo['last_login'],
+        'last_login_ip' => $userInfo['last_login_ip']
+    ];
+    
+    // Prepare response
     $responseData = [
+        'user' => $userObject,
         'settings' => $settings,
+        'login_history' => $loginHistory,
         'data' => [] // Empty array since we're not implementing cloud saves yet
     ];
     
@@ -624,13 +737,24 @@ function handleUpdateProfile($authHeader) {
         $params[] = $email;
         $types .= 's';
     }
-    
-    // Check if updating password
+      // Check if updating password
     if (isset($data['password'])) {
         $password = $data['password'];
         
         if (strlen($password) < 8) {
             sendResponse(false, 'Password must be at least 8 characters', null, 400);
+            return;
+        }
+        
+        // Check for at least one uppercase letter
+        if (!preg_match('/[A-Z]/', $password)) {
+            sendResponse(false, 'Password must contain at least one uppercase letter', null, 400);
+            return;
+        }
+        
+        // Check for at least one number
+        if (!preg_match('/[0-9]/', $password)) {
+            sendResponse(false, 'Password must contain at least one number', null, 400);
             return;
         }
         
@@ -734,4 +858,92 @@ function authenticateRequest($authHeader) {
     }
     
     return $userData;
+}
+
+/**
+ * Handle profile photo upload
+ */
+function handleProfilePhotoUpload($authHeader) {
+    // Include file upload utility
+    require_once 'file_upload.php';
+    
+    $userData = authenticateRequest($authHeader);
+    if (!$userData) return;
+    
+    // Check if files were uploaded
+    if (!isset($_FILES['photo']) || empty($_FILES['photo'])) {
+        sendResponse(false, 'No file uploaded', null, 400);
+        return;
+    }
+    
+    // Process the uploaded file
+    $result = handleProfilePhotoUpload($_FILES['photo'], $userData->userId);
+    
+    if (!$result['success']) {
+        sendResponse(false, $result['message'], null, 400);
+        return;
+    }
+    
+    // Update user profile with new photo path
+    global $db;
+    $stmt = $db->prepare("UPDATE users SET profile_photo = ? WHERE id = ?");
+    $stmt->bind_param('si', $result['path'], $userData->userId);
+    
+    if (!$stmt->execute()) {
+        sendResponse(false, 'Failed to update profile photo', null, 500);
+        return;
+    }
+    
+    sendResponse(true, 'Profile photo uploaded successfully', [
+        'photo_url' => $result['path']
+    ]);
+}
+
+/**
+ * Handle admin request with admin verification
+ */
+function handleAdminRequest($authHeader) {
+    $userData = authenticateRequest($authHeader);
+    if (!$userData) return;
+    
+    // Check if user is admin
+    if (!isset($userData->admin) || !$userData->admin) {
+        sendResponse(false, 'Unauthorized: Admin privileges required', null, 403);
+        return;
+    }
+    
+    global $db;
+    
+    // Get user statistics for admin dashboard
+    $userStats = [];
+    
+    // Total users
+    $stmt = $db->query("SELECT COUNT(*) as total FROM users");
+    $userStats['total_users'] = $stmt->fetch_assoc()['total'];
+    
+    // Active users (last login within 30 days)
+    $stmt = $db->query("SELECT COUNT(*) as active FROM users WHERE last_login >= DATE_SUB(NOW(), INTERVAL 30 DAY)");
+    $userStats['active_users'] = $stmt->fetch_assoc()['active'];
+    
+    // New users in last 30 days
+    $stmt = $db->query("SELECT COUNT(*) as new_users FROM users WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)");
+    $userStats['new_users'] = $stmt->fetch_assoc()['new_users'];
+    
+    // Recent logins
+    $stmt = $db->query("SELECT u.username, l.login_time, l.browser, l.os, l.device_type, l.country, l.city, l.ip_address 
+                         FROM login_history l
+                         JOIN users u ON l.user_id = u.id
+                         ORDER BY l.login_time DESC
+                         LIMIT 10");
+    
+    $recentLogins = [];
+    while ($row = $stmt->fetch_assoc()) {
+        $recentLogins[] = $row;
+    }
+    
+    // Send admin dashboard data
+    sendResponse(true, 'Admin data retrieved successfully', [
+        'user_stats' => $userStats,
+        'recent_logins' => $recentLogins
+    ]);
 }

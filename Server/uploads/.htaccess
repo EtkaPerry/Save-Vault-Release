@@ -1,0 +1,37 @@
+# Secure uploads directory
+# Save Vault - Security Configuration
+
+# Disable directory listing
+Options -Indexes
+
+# Prevent script execution in upload directories
+<FilesMatch "(?i)\.(php|pl|py|jsp|asp|htm|shtml|sh|cgi|js)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# Only allow image files to be accessed directly
+<FilesMatch "(?i)\.(jpg|jpeg|png|gif)$">
+    Order Allow,Deny
+    Allow from all
+</FilesMatch>
+
+# Additional security headers
+<IfModule mod_headers.c>
+    # Disable content type sniffing
+    Header set X-Content-Type-Options "nosniff"
+    
+    # Prevent embedding in frames
+    Header set X-Frame-Options "DENY"
+</IfModule>
+
+# Protect against possible XSS attacks
+<IfModule mod_headers.c>
+    Header set X-XSS-Protection "1; mode=block"
+</IfModule>
+
+# Prevent access to hidden files
+<FilesMatch "^\.">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>

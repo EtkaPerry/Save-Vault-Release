@@ -16,9 +16,10 @@ $JWT_SECRET = JWT_SECRET;
  * @param string $username Username
  * @param int $issuedAt Time when token was issued (unix timestamp)
  * @param int $expire Time when token expires (unix timestamp)
+ * @param bool $isAdmin Whether the user is an admin (default: false)
  * @return string Generated JWT token
  */
-function generateJWT($userId, $username, $issuedAt, $expire) {
+function generateJWT($userId, $username, $issuedAt, $expire, $isAdmin = false) {
     global $JWT_SECRET;
     
     // Create token header
@@ -33,7 +34,8 @@ function generateJWT($userId, $username, $issuedAt, $expire) {
         'name' => $username,  // Username
         'iat' => $issuedAt,   // Issued at time
         'exp' => $expire,     // Expiration time
-        'jti' => uniqid()     // Unique token ID
+        'jti' => uniqid(),    // Unique token ID
+        'admin' => $isAdmin   // Admin status
     ];
     
     // Encode Header

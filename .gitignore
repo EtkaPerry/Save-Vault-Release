@@ -11,3 +11,4 @@ pro.txt
 Server/site/download/
 .vscode/
 .cache_ggshield
+.last_upload.json

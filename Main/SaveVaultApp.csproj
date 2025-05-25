@@ -7,15 +7,24 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <ApplicationIcon>Assets\logo.ico</ApplicationIcon>
     <AssemblyName>Save Vault</AssemblyName>
-    <Version>0.2.1.1</Version>
-    <FileVersion>0.2.1.1</FileVersion>
-    <AssemblyVersion>0.2.1.1</AssemblyVersion>
+    <Version>0.2.3.7</Version>
+    <FileVersion>0.2.3.7</FileVersion>
+    <AssemblyVersion>0.2.3.7</AssemblyVersion>
     <RuntimeIdentifiers>win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <ItemGroup>
     <Folder Include="Models\" />
     <AvaloniaResource Include="Assets\**" />
+    <None Update="Assets\PrivacyPolicy.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Assets\TermsOfService.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Assets\SecurityPolicy.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>

@@ -1,0 +1,73 @@
+# Security Policy
+
+_Last updated: May 26, 2025_
+
+## Introduction
+
+At Save Vault, we take the security of your data very seriously. This security policy outlines the measures we take to protect your information and the steps you can take to help keep your account secure. Please note that your actual game save files are never uploaded or stored on our servers - they remain exclusively on your computer.
+
+## Data Protection
+
+We implement the following security measures to protect your data:
+- Secure password storage using industry-standard hashing algorithms
+- Regular security audits and vulnerability assessments
+- Data backups stored securely
+- Strict access controls for system administrators
+
+## Local Save Storage
+
+A key security benefit of Save Vault is that we never upload your actual game save files:
+- All game save files remain stored exclusively on your local device
+- We only store metadata about your saves (such as game names and file locations)
+- This approach ensures maximum security for your actual game data
+- Your save files cannot be compromised through our service since they never leave your computer
+
+## Account Security
+
+To help maintain the security of your account, we recommend the following practices:
+- Use a strong, unique password for your Save Vault account
+- Keep your email account secure, as it can be used for account recovery
+- Be cautious of phishing attempts that may target your Save Vault account
+- Log out of your account when using shared or public computers
+
+## Vulnerability Disclosure
+
+We appreciate the work of security researchers in helping us maintain a secure platform. If you discover a security vulnerability, please report it to us by email at security@vault.etka.co.uk.
+
+When reporting vulnerabilities, please provide:
+- A detailed description of the vulnerability
+- Steps to reproduce the issue
+- Potential impact of the vulnerability
+- Any suggestions for mitigating the risk
+
+We commit to:
+- Acknowledging receipt of your vulnerability report within 48 hours
+- Providing regular updates on our progress in addressing the vulnerability
+- Not pursuing legal action against researchers who report vulnerabilities responsibly
+- Addressing confirmed vulnerabilities as quickly as possible
+
+## Data Breach Response
+
+In the event of a data breach, we will:
+- Promptly investigate the incident to determine its scope and impact
+- Take immediate steps to contain and remediate the breach
+- Notify affected users as required by applicable laws and regulations
+- Work with law enforcement and security experts as appropriate
+- Implement measures to prevent similar incidents in the future
+
+## Service Availability
+
+We strive to maintain the availability of our Service under a best-effort commitment:
+- We monitor our systems continuously to ensure service reliability
+- We perform maintenance during low-traffic periods whenever possible
+- We implement redundancy measures to minimize downtime
+- In the event of planned maintenance, we will attempt to provide advance notice when practical
+
+## Updates and Patches
+
+Save Vault regularly releases updates to address security vulnerabilities. We recommend keeping the application updated to the latest version.
+
+## Contact Us
+
+If you have any questions or concerns about our security practices, please contact us at:
+Email: security@vault.etka.co.uk

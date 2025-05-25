@@ -14,11 +14,11 @@ using Avalonia.Markup.Xaml; // Add this using statement for AvaloniaXamlLoader
 namespace SaveVaultApp.Views;
 
 public partial class OptionsWindow : Window
-{
-    private Panel? _generalPanel;
+{    private Panel? _generalPanel;
     private Panel? _appearancePanel;
     private Panel? _storagePanel;
     private Panel? _updatesPanel;
+    private Panel? _legalPanel;
     private Panel? _creditPanel;
     
     // Reference to the main view model for app refresh
@@ -92,12 +92,12 @@ public partial class OptionsWindow : Window
         if (closeButton != null)
         {
             closeButton.Click += CloseButton_Click;
-        }
-          // Get panel references
+        }          // Get panel references
         _generalPanel = this.FindControl<Panel>("GeneralPanel");
         _appearancePanel = this.FindControl<Panel>("AppearancePanel");
         _storagePanel = this.FindControl<Panel>("StoragePanel");
         _updatesPanel = this.FindControl<Panel>("UpdatesPanel");
+        _legalPanel = this.FindControl<Panel>("LegalPanel");
         _creditPanel = this.FindControl<Panel>("CreditPanel");
         
         // Set up options list selection handling
@@ -114,12 +114,31 @@ public partial class OptionsWindow : Window
         {
             resetCacheButton.Click += ResetCacheButton_Click;
         }
-        
-        // Set up reset options button
+          // Set up reset options button
         var resetOptionsButton = this.FindControl<Button>("ResetOptionsButton");
         if (resetOptionsButton != null)
         {
             resetOptionsButton.Click += ResetOptionsButton_Click;
+        }
+        
+        // Set up legal document buttons
+        var termsButton = this.FindControl<Button>("TermsOfServiceButton");
+        var securityButton = this.FindControl<Button>("SecurityPolicyButton");
+        var privacyButton = this.FindControl<Button>("PrivacyPolicyButton");
+        
+        if (termsButton != null)
+        {
+            termsButton.Click += (s, e) => LoadLegalDocument("TermsOfService");
+        }
+        
+        if (securityButton != null)
+        {
+            securityButton.Click += (s, e) => LoadLegalDocument("SecurityPolicy");
+        }
+        
+        if (privacyButton != null)
+        {
+            privacyButton.Click += (s, e) => LoadLegalDocument("PrivacyPolicy");
         }
     }
     
@@ -151,6 +170,7 @@ public partial class OptionsWindow : Window
                 if (_appearancePanel != null) _appearancePanel.IsVisible = false;
                 if (_storagePanel != null) _storagePanel.IsVisible = false;
                 if (_updatesPanel != null) _updatesPanel.IsVisible = false;
+                if (_legalPanel != null) _legalPanel.IsVisible = false;
                 if (_creditPanel != null) _creditPanel.IsVisible = false;
                 
                 // Show the selected panel
@@ -182,6 +202,17 @@ public partial class OptionsWindow : Window
                                 ((ReactiveUI.IReactiveObject)viewModel).RaisePropertyChanged(
                                     new System.ComponentModel.PropertyChangedEventArgs(nameof(OptionsViewModel.LastUpdateCheck))
                                 );
+                            }                        }
+                        break;                    case "Legal":
+                        if (_legalPanel != null) 
+                        {
+                            _legalPanel.IsVisible = true;
+                            // Load Terms of Service by default when Legal panel is opened
+                            LoadLegalDocument("TermsOfService");
+                            // Update the legal acceptance date to current date when the user views the legal documents
+                            if (DataContext is OptionsViewModel viewModel)
+                            {
+                                viewModel.UpdateLegalAcceptanceDate();
                             }
                         }
                         break;
@@ -384,8 +415,79 @@ public partial class OptionsWindow : Window
             settings.OptionsWindowWidth = Width;
             settings.OptionsWindowHeight = Height;
             settings.OptionsWindowPositionX = Position.X;
-            settings.OptionsWindowPositionY = Position.Y;
-            settings.ForceSave(); // Use ForceSave for reliability
+            settings.OptionsWindowPositionY = Position.Y;            settings.ForceSave(); // Use ForceSave for reliability
+        }
+    }    private void LoadLegalDocument(string documentType)
+    {
+        if (DataContext is OptionsViewModel viewModel)
+        {
+            viewModel.LoadLegalDocument(documentType);
+            
+            // Update button styles
+            var termsButton = this.FindControl<Button>("TermsOfServiceButton");
+            var securityButton = this.FindControl<Button>("SecurityPolicyButton");
+            var privacyButton = this.FindControl<Button>("PrivacyPolicyButton");
+            
+            // Try to get the dynamic resources safely
+            Avalonia.Media.IBrush? normalBackground = null;
+            Avalonia.Media.IBrush? hoverBackground = null;
+            
+            try
+            {
+                if (this.TryFindResource("ListItemBackground", out var normalBg) && normalBg is Avalonia.Media.IBrush)
+                    normalBackground = (Avalonia.Media.IBrush)normalBg;
+                
+                if (this.TryFindResource("ListItemBackgroundHover", out var hoverBg) && hoverBg is Avalonia.Media.IBrush)
+                    hoverBackground = (Avalonia.Media.IBrush)hoverBg;
+            }
+            catch
+            {
+                // Fallback to default colors if dynamic resources fail
+                normalBackground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#303030"));
+                hoverBackground = new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#404040"));
+            }
+            
+            // Use fallback colors if resources not found
+            normalBackground ??= new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#303030"));
+            hoverBackground ??= new Avalonia.Media.SolidColorBrush(Avalonia.Media.Color.Parse("#404040"));
+            
+            // Reset all button backgrounds and update text colors
+            if (termsButton != null)
+            {
+                termsButton.Background = normalBackground;
+                termsButton.Foreground = this.FindResource("TextColor") as Avalonia.Media.IBrush ?? 
+                    new Avalonia.Media.SolidColorBrush(Avalonia.Media.Colors.White);
+            }
+            
+            if (securityButton != null)
+            {
+                securityButton.Background = normalBackground;
+                securityButton.Foreground = this.FindResource("TextColor") as Avalonia.Media.IBrush ?? 
+                    new Avalonia.Media.SolidColorBrush(Avalonia.Media.Colors.White);
+            }
+            
+            if (privacyButton != null)
+            {
+                privacyButton.Background = normalBackground;
+                privacyButton.Foreground = this.FindResource("TextColor") as Avalonia.Media.IBrush ?? 
+                    new Avalonia.Media.SolidColorBrush(Avalonia.Media.Colors.White);
+            }
+            
+            // Highlight the selected button
+            Button? selectedButton = documentType switch
+            {
+                "TermsOfService" => termsButton,
+                "SecurityPolicy" => securityButton,
+                "PrivacyPolicy" => privacyButton,
+                _ => null
+            };
+            
+            if (selectedButton != null)
+            {
+                selectedButton.Background = hoverBackground;
+                selectedButton.Foreground = this.FindResource("TextColor") as Avalonia.Media.IBrush ?? 
+                    new Avalonia.Media.SolidColorBrush(Avalonia.Media.Colors.White);
+            }
         }
     }
 }

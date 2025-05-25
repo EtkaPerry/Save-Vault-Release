@@ -1,0 +1,145 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="600" d:DesignHeight="520"
+        x:Class="SaveVaultApp.Views.TermsWindow"
+        Title="Terms and Conditions"
+        Width="600" Height="520"
+        WindowStartupLocation="CenterScreen"
+        CanResize="True"
+        MinWidth="600" MinHeight="520"
+        Icon="/Assets/logo.ico"
+        Background="{DynamicResource PanelBackground}">
+
+    <Window.Styles>
+        <Style Selector="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextColor}" />
+        </Style>
+    </Window.Styles>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Spacing="10">
+            <TextBlock Text="Terms and Conditions" 
+                     FontSize="24" 
+                     FontWeight="Bold" 
+                     HorizontalAlignment="Center"
+                     Foreground="{DynamicResource PrimaryColor}"/>
+            
+            <TextBlock Text="Welcome to Save Vault! Before you continue, please read and accept our terms and conditions." 
+                     TextWrapping="Wrap" 
+                     HorizontalAlignment="Center"
+                     Margin="0,0,0,10"/>
+        </StackPanel>
+
+        <!-- Content -->
+        <ScrollViewer Grid.Row="1" 
+                     Margin="0,10" 
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Spacing="15">
+                <!-- Terms links with checkboxes and styling -->
+                <Border Background="{DynamicResource ListItemBackground}"
+                       Padding="15"
+                       CornerRadius="4">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <CheckBox Grid.Column="0" 
+                                Name="PrivacyPolicyCheckbox"
+                                Margin="0,0,10,0"
+                                VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" 
+                                 Text="I have read and accept the Privacy Policy" 
+                                 VerticalAlignment="Center"
+                                 FontSize="16"/>
+                        <Button Grid.Column="2"
+                               Content="View"
+                               Padding="10,5"
+                               Name="PrivacyPolicyButton"
+                               Background="{DynamicResource PrimaryColor}"
+                               Foreground="White"/>
+                    </Grid>
+                </Border>
+
+                <Border Background="{DynamicResource ListItemBackground}"
+                       Padding="15"
+                       CornerRadius="4">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <CheckBox Grid.Column="0" 
+                                Name="TermsOfServiceCheckbox"
+                                Margin="0,0,10,0"
+                                VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" 
+                                 Text="I have read and accept the Terms of Service" 
+                                 VerticalAlignment="Center"
+                                 FontSize="16"/>
+                        <Button Grid.Column="2"
+                               Content="View"
+                               Padding="10,5"
+                               Name="TermsOfServiceButton"
+                               Background="{DynamicResource PrimaryColor}"
+                               Foreground="White"/>
+                    </Grid>
+                </Border>
+
+                <Border Background="{DynamicResource ListItemBackground}"
+                       Padding="15"
+                       CornerRadius="4">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                        <CheckBox Grid.Column="0" 
+                                Name="SecurityPolicyCheckbox"
+                                Margin="0,0,10,0"
+                                VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" 
+                                 Text="I have read and accept the Security Policy" 
+                                 VerticalAlignment="Center"
+                                 FontSize="16"/>
+                        <Button Grid.Column="2"
+                               Content="View"
+                               Padding="10,5"
+                               Name="SecurityPolicyButton"
+                               Background="{DynamicResource PrimaryColor}"
+                               Foreground="White"/>
+                    </Grid>
+                </Border>
+                
+                <TextBlock TextWrapping="Wrap" Margin="0,20,0,0" FontWeight="SemiBold" HorizontalAlignment="Center">
+                    You must accept all terms to continue using Save Vault.
+                </TextBlock>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer with Accept and Decline buttons -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="20" Margin="0,10,0,0">
+            <Button Content="Decline" 
+                   Width="120"
+                   Height="40" 
+                   Name="DeclineButton"
+                   Background="{DynamicResource ErrorColor}"
+                   Foreground="White"
+                   FontWeight="SemiBold"
+                   CornerRadius="4"
+                   HorizontalContentAlignment="Center"
+                   VerticalContentAlignment="Center"
+                   FontSize="16"/>
+
+            <Button Content="Accept" 
+                   Width="120"
+                   Height="40" 
+                   Name="AcceptButton"
+                   Background="{DynamicResource PrimaryColor}"
+                   Foreground="White"
+                   FontWeight="SemiBold"
+                   CornerRadius="4"
+                   HorizontalContentAlignment="Center"
+                   VerticalContentAlignment="Center"
+                   FontSize="16"/>
+        </StackPanel>
+    </Grid>
+</Window>

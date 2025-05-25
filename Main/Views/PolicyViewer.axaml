@@ -1,0 +1,145 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="640" d:DesignHeight="540"
+        x:Class="SaveVaultApp.Views.PolicyViewer"
+        Title="Policy Viewer"
+        Width="640" Height="540"
+        WindowStartupLocation="CenterOwner"
+        CanResize="True"
+        MinWidth="640" MinHeight="540"
+        Background="{DynamicResource PanelBackground}">
+
+    <Window.Styles>
+        <Style Selector="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextColor}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <!-- Header styles -->
+        <Style Selector="TextBlock.h1">
+            <Setter Property="FontSize" Value="24"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Margin" Value="0,10,0,5"/>
+        </Style>
+        <Style Selector="TextBlock.h2">
+            <Setter Property="FontSize" Value="20"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Margin" Value="0,8,0,4"/>
+        </Style>
+        <Style Selector="TextBlock.h3">
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,6,0,3"/>
+        </Style>
+        <Style Selector="TextBlock.list-item">
+            <Setter Property="Margin" Value="20,2,0,2"/>
+        </Style>
+    </Window.Styles>
+    
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <!-- Header with External Link and Accessibility Controls -->
+        <Grid Grid.Row="0">
+            <!-- Accessibility Controls -->
+            <StackPanel Orientation="Horizontal" 
+                       HorizontalAlignment="Left" 
+                       VerticalAlignment="Top" 
+                       Spacing="8">
+                <Button Name="DecreaseTextSizeButton" 
+                       Width="32" 
+                       Height="32"
+                       Background="Transparent"
+                       BorderBrush="{DynamicResource PrimaryColor}"
+                       BorderThickness="1"
+                       CornerRadius="16"
+                       Padding="0"
+                       ToolTip.Tip="Decrease text size">
+                    <TextBlock Text="A-" 
+                             HorizontalAlignment="Center" 
+                             VerticalAlignment="Center"
+                             FontWeight="Bold" />
+                </Button>
+                <Button Name="IncreaseTextSizeButton"
+                       Width="32" 
+                       Height="32"
+                       Background="Transparent"
+                       BorderBrush="{DynamicResource PrimaryColor}"
+                       BorderThickness="1"
+                       CornerRadius="16"
+                       Padding="0" 
+                       ToolTip.Tip="Increase text size">
+                    <TextBlock Text="A+" 
+                             HorizontalAlignment="Center" 
+                             VerticalAlignment="Center"
+                             FontWeight="Bold" />
+                </Button>
+                <Button Name="ResetTextSizeButton"
+                       Width="32" 
+                       Height="32"
+                       Background="Transparent"
+                       BorderBrush="{DynamicResource PrimaryColor}"
+                       BorderThickness="1"
+                       CornerRadius="16"
+                       Padding="0" 
+                       ToolTip.Tip="Reset text size">
+                    <TextBlock Text="A" 
+                             HorizontalAlignment="Center" 
+                             VerticalAlignment="Center"
+                             FontWeight="Bold" />
+                </Button>
+            </StackPanel>
+
+            <TextBlock Name="TitleBlock" 
+                     FontSize="24" 
+                     FontWeight="Bold" 
+                     HorizontalAlignment="Center"
+                     Margin="0,0,0,15"
+                     Foreground="{DynamicResource PrimaryColor}"/>
+                     
+            <!-- External Link Button -->
+            <Button Name="ExternalLinkButton"
+                   HorizontalAlignment="Right"
+                   VerticalAlignment="Top"
+                   Padding="8"
+                   Background="Transparent"
+                   ToolTip.Tip="View on website">
+                <TextBlock Text="🔗" FontSize="18"/>
+            </Button>
+        </Grid>
+        
+        <!-- Content -->
+        <ScrollViewer Grid.Row="1" 
+                     Margin="0,0,0,15" 
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Name="ContentPanel" Margin="0,0,10,0" MaxWidth="600"/>
+        </ScrollViewer>
+        
+        <!-- Footer with Last Updated and Close button -->
+        <Grid Grid.Row="2">
+            <TextBlock Name="LastUpdatedBlock" 
+                     VerticalAlignment="Center"
+                     HorizontalAlignment="Left"
+                     Opacity="0.7"
+                     FontSize="12"/>
+                     
+            <Button Content="Close" 
+                   HorizontalAlignment="Center"
+                   Width="120"
+                   Height="40" 
+                   Name="CloseButton"
+                   Background="{DynamicResource PrimaryColor}"
+                   Foreground="White"
+                   FontWeight="SemiBold"
+                   CornerRadius="4"
+                   HorizontalContentAlignment="Center"
+                   VerticalContentAlignment="Center"/>
+        </Grid>
+    </Grid>
+</Window>

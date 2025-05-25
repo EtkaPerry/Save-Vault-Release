@@ -175,8 +175,11 @@ public partial class App : Application
                     _ => ThemeVariant.Default // System theme
                 };
             }
-              // Create the ViewModel and MainWindow
+            
+            // Create the ViewModel and MainWindow
             var viewModel = new MainWindowViewModel();
+            viewModel.IsSearchEnabled = false; // Disable searching until terms are accepted
+            
             var mainWindow = new MainWindow
             {
                 DataContext = viewModel
@@ -188,8 +191,50 @@ public partial class App : Application
             // Check for updates if enabled
             _ = viewModel.InitializeUpdateCheck();
             
-            // Set the MainWindow
-            desktop.MainWindow = mainWindow;
+            // Show Terms and Conditions if not accepted yet
+            if (!settings.TermsAccepted)
+            {
+                logger.Info("Terms not yet accepted, showing Terms and Conditions window");
+                var termsWindow = new TermsWindow();
+                termsWindow.Show();
+                  // Only proceed with showing the main window after terms are accepted
+                termsWindow.Closed += (sender, args) =>
+                {
+                    // Check both the window property and the settings to be sure
+                    var currentSettings = Settings.Instance;
+                    bool termsWereAccepted = termsWindow.TermsAccepted || currentSettings.TermsAccepted;
+                    
+                    if (termsWereAccepted)
+                    {
+                        // Terms were accepted, show the main window
+                        logger.Info("Terms accepted, showing main window");
+                        desktop.MainWindow = mainWindow;
+                        mainWindow.Show();
+                        
+                        // Now that terms are accepted and main window is shown, start searching for programs
+                        logger.Info("Starting program search after terms accepted");
+                        viewModel.IsSearchEnabled = true;
+                        viewModel.InitializeApplicationSearch();
+                    }
+                    else
+                    {
+                        // Terms were not accepted, exit the application
+                        logger.Info("Terms not accepted, exiting application");
+                        desktop.Shutdown();
+                    }
+                };
+            }            else
+            {
+                // Terms already accepted, show the main window directly
+                logger.Info("Terms already accepted, showing main window");
+                desktop.MainWindow = mainWindow;
+                mainWindow.Show();
+                
+                // Start searching for programs
+                logger.Info("Starting program search (terms previously accepted)");
+                viewModel.IsSearchEnabled = true;
+                viewModel.InitializeApplicationSearch();
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

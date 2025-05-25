@@ -13,6 +13,7 @@ using Avalonia;
 using System.Linq;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Text;
 
 namespace SaveVaultApp.ViewModels;
 
@@ -413,8 +414,7 @@ public partial class OptionsViewModel : ViewModelBase
         get => _updateAvailable;
         set => this.RaiseAndSetIfChanged(ref _updateAvailable, value);
     }
-    
-    private bool _isDownloadingUpdate;
+      private bool _isDownloadingUpdate;
     public bool IsDownloadingUpdate
     {
         get => _isDownloadingUpdate;
@@ -425,6 +425,15 @@ public partial class OptionsViewModel : ViewModelBase
         get => _updateStatus;
         set => this.RaiseAndSetIfChanged(ref _updateStatus, value);
     }
+      // Legal document properties
+    private string _legalDocumentContent = string.Empty;
+    public string LegalDocumentContent
+    {
+        get => _legalDocumentContent;
+        set => this.RaiseAndSetIfChanged(ref _legalDocumentContent, value);    }
+    
+    // Property for legal acceptance date display
+    public string LegalAcceptanceDate => _settings.LegalAcceptanceDate.ToString("dd.MM.yyyy");
       public string LastUpdateCheck => _settings.LastUpdateCheck == DateTime.MinValue ? 
         "Never" : _settings.LastUpdateCheck.ToString("g");
     
@@ -452,12 +461,121 @@ public partial class OptionsViewModel : ViewModelBase
         this.RaisePropertyChanged(nameof(ReleaseDate));
         this.RaisePropertyChanged(nameof(UpdateAvailable));
     }
-    
-    [RelayCommand]
+      [RelayCommand]
     private async Task InstallUpdate()
     {
         IsDownloadingUpdate = true;
         await UpdateService.Instance.DownloadAndInstallUpdate();
         IsDownloadingUpdate = false;
+    }
+      // Legal document loading method
+    public void LoadLegalDocument(string documentType)
+    {
+        try
+        {
+            string fileName = documentType switch
+            {
+                "TermsOfService" => "TermsOfService.txt",
+                "SecurityPolicy" => "SecurityPolicy.txt", 
+                "PrivacyPolicy" => "PrivacyPolicy.txt",
+                _ => "TermsOfService.txt"
+            };
+            
+            // Get the path to the Assets folder
+            var assetsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", fileName);
+            
+            if (File.Exists(assetsPath))
+            {                var content = File.ReadAllText(assetsPath);
+                
+                // Apply enhanced formatting for legal documents
+                StringBuilder formattedContent = new StringBuilder();
+                
+                // Process the content line by line for better control
+                var lines = content.Split('\n');
+                bool isFirstH1 = true;
+                
+                foreach (var line in lines)
+                {
+                    string trimmedLine = line.Trim();
+                    
+                    // Handle main title (H1)
+                    if (trimmedLine.StartsWith("# "))
+                    {
+                        string title = trimmedLine.Substring(2);
+                        // Only add extra spacing after the first H1 (title)
+                        if (isFirstH1)
+                        {
+                            formattedContent.AppendLine(title);
+                            isFirstH1 = false;
+                        }
+                        else
+                        {
+                            formattedContent.AppendLine($"\n\n{title}");
+                        }
+                    }
+                    // Handle section headers (H2)
+                    else if (trimmedLine.StartsWith("## "))
+                    {
+                        string sectionTitle = trimmedLine.Substring(3);
+                        formattedContent.AppendLine($"\n\n{sectionTitle.ToUpper()}");
+                        formattedContent.AppendLine($"{new string('━', 40)}");
+                    }
+                    // Handle subsection headers (H3)
+                    else if (trimmedLine.StartsWith("### "))
+                    {
+                        string subSectionTitle = trimmedLine.Substring(4);
+                        formattedContent.AppendLine($"\n{subSectionTitle}");
+                        formattedContent.AppendLine($"{new string('─', 25)}");
+                    }
+                    // Handle list items
+                    else if (trimmedLine.StartsWith("- "))
+                    {
+                        string listItem = trimmedLine.Substring(2);
+                        formattedContent.AppendLine($"• {listItem}");
+                    }
+                    // Process other content
+                    else if (!string.IsNullOrWhiteSpace(trimmedLine))
+                    {
+                        // Clean up markdown formatting
+                        string processedLine = trimmedLine
+                            .Replace("_Last updated:", "Last updated:")
+                            .Replace("_", "")
+                            .Replace("**", "")
+                            .Replace("*", "");
+                        
+                        formattedContent.AppendLine(processedLine);
+                    }
+                    else
+                    {
+                        // Preserve empty lines for spacing
+                        formattedContent.AppendLine();
+                    }
+                }
+                
+                // Clean up multiple consecutive newlines
+                string result = System.Text.RegularExpressions.Regex.Replace(
+                    formattedContent.ToString(), 
+                    @"\n{3,}", 
+                    "\n\n"
+                );
+                
+                LegalDocumentContent = result.Trim();
+            }
+            else
+            {
+                LegalDocumentContent = $"Could not load {documentType}.\n\nFile not found at: {assetsPath}\n\nPlease ensure the application assets are properly installed.";
+            }
+        }
+        catch (Exception ex)
+        {            LegalDocumentContent = $"Error loading {documentType}:\n\n{ex.Message}\n\nPlease contact support if this issue persists.";
+        }
+    }
+    
+    // Method to update the legal acceptance date to the current date
+    public void UpdateLegalAcceptanceDate()
+    {
+        _settings.LegalAcceptanceDate = DateTime.Now;
+        SaveChanges();
+        this.RaisePropertyChanged(nameof(LegalAcceptanceDate));
     }
 }

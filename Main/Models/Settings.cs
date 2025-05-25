@@ -227,15 +227,24 @@ public class Settings
             _changeDetectionEnabled = value;
             QueueSave();
         }
-    }
-
-    private DateTime _lastUpdateCheck = DateTime.MinValue;
+    }    private DateTime _lastUpdateCheck = DateTime.MinValue;
     public DateTime LastUpdateCheck
     {
         get => _lastUpdateCheck;
         set
         {
             _lastUpdateCheck = value;
+            QueueSave();
+        }
+    }
+
+    private DateTime _legalAcceptanceDate = DateTime.Parse("2025-05-24");  // Default to initial acceptance date
+    public DateTime LegalAcceptanceDate
+    {
+        get => _legalAcceptanceDate;
+        set
+        {
+            _legalAcceptanceDate = value;
             QueueSave();
         }
     }
@@ -359,6 +368,18 @@ public class Settings
         set
         {
             _isOptionsMaximized = value;
+            QueueSave();
+        }
+    }
+    
+    // Terms and Conditions acceptance
+    private bool _termsAccepted = false;
+    public bool TermsAccepted
+    {
+        get => _termsAccepted;
+        set
+        {
+            _termsAccepted = value;
             QueueSave();
         }
     }

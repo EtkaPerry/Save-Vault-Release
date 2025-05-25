@@ -48,14 +48,13 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="30*" />
                 <ColumnDefinition Width="70*" />
-            </Grid.ColumnDefinitions>
-
-            <!-- Left Panel (30%) -->
+            </Grid.ColumnDefinitions>            <!-- Left Panel (30%) -->
             <Border Grid.Column="0" Background="{DynamicResource SidebarBackground}" Padding="10">                <ListBox Background="Transparent" BorderThickness="0" Name="OptionsList">
                     <ListBoxItem Content="General" />
                     <ListBoxItem Content="Appearance" />
                     <ListBoxItem Content="Storage" />
                     <ListBoxItem Content="Updates" />
+                    <ListBoxItem Content="Legal" />
                     <ListBoxItem Content="Credit" />
                 </ListBox>
             </Border>
@@ -436,7 +435,77 @@
                                          Text="{Binding ReleaseNotes, Converter={x:Static conv:NewlineConverter.Instance}}"/>
                             </StackPanel>
                         </Border>
-                    </StackPanel>                    <!-- Credit Panel -->
+                    </StackPanel>                    <!-- Legal Panel -->
+                    <StackPanel Name="LegalPanel" IsVisible="False">
+                        <TextBlock Text="Legal Documents" FontSize="18" FontWeight="Bold" Margin="0,0,0,15"/>
+                        
+                        <!-- Legal Document Selection -->
+                        <Grid Margin="0,0,0,15" ColumnDefinitions="*,*,*" RowDefinitions="Auto">
+                            <Button Name="TermsOfServiceButton" 
+                                    Grid.Column="0" 
+                                    Content="Terms of Service" 
+                                    Background="{DynamicResource ListItemBackgroundHover}"
+                                    BorderThickness="0"
+                                    CornerRadius="4"
+                                    Padding="12,6"
+                                    FontSize="12"
+                                    Margin="0,0,5,0"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Center"
+                                    Foreground="{DynamicResource TextColor}"/>
+                            <Button Name="SecurityPolicyButton" 
+                                    Grid.Column="1" 
+                                    Content="Security Policy" 
+                                    Background="{DynamicResource ListItemBackground}"
+                                    BorderThickness="0"
+                                    CornerRadius="4"
+                                    Padding="12,6"
+                                    FontSize="12"
+                                    Margin="5,0,5,0"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Center"
+                                    Foreground="{DynamicResource TextColor}"/>
+                            <Button Name="PrivacyPolicyButton" 
+                                    Grid.Column="2" 
+                                    Content="Privacy Policy" 
+                                    Background="{DynamicResource ListItemBackground}"
+                                    BorderThickness="0"
+                                    CornerRadius="4"
+                                    Padding="12,6"
+                                    FontSize="12"
+                                    Margin="5,0,0,0"
+                                    HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Center"
+                                    Foreground="{DynamicResource TextColor}"/>
+                        </Grid>
+                        
+                        <!-- Document Content -->
+                        <Border Background="{DynamicResource ListItemBackground}"
+                                CornerRadius="8"
+                                Padding="20"
+                                Height="280">                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                        HorizontalScrollBarVisibility="Disabled">
+                                <TextBlock Name="LegalContentTextBlock"
+                                          Text="{Binding LegalDocumentContent}"
+                                          TextWrapping="Wrap"
+                                          LineHeight="22"
+                                          FontFamily="Segoe UI, Roboto, sans-serif"
+                                          FontSize="13" 
+                                          Foreground="{DynamicResource TextColor}"/>
+                            </ScrollViewer>
+                        </Border>
+                        
+                        <!-- Info messages -->
+                        <Grid Margin="0,15,0,0">
+                            <TextBlock Text="{Binding LegalAcceptanceDate, StringFormat='You accepted these at {0}'}" 
+                                    HorizontalAlignment="Right"
+                                    Opacity="0.7"
+                                    FontStyle="Italic"
+                                    FontSize="12"/>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- Credit Panel -->
                     <StackPanel Name="CreditPanel" IsVisible="False">
                         <TextBlock Text="Credits" FontSize="18" FontWeight="Bold" Margin="0,0,0,15"/>
                         <TextBlock Text="Save Vault" FontSize="16" Margin="0,5,0,5"/>

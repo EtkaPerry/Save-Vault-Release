@@ -168,7 +168,12 @@ public partial class MainWindowViewModel : ViewModelBase
 
     // Changed to internal to allow access from App.axaml.cs
     internal Window? _mainWindow; 
-    public bool IsExiting { get; set; }    // Constructor to initialize the application
+    public bool IsExiting { get; set; }
+    
+    // Property to control whether program search is enabled
+    public bool IsSearchEnabled { get; set; } = false;
+    
+    // Constructor to initialize the application
     public MainWindowViewModel()
     {
         // Load settings and make sure static instance is updated
@@ -279,20 +284,9 @@ public partial class MainWindowViewModel : ViewModelBase
         _uiRefreshTimer.AutoReset = true;
         _uiRefreshTimer.Start(); // Start this timer immediately
         
-        // Load the installed applications when the ViewModel is created
-        Task.Run(LoadInstalledAppsAsync).ContinueWith(_ => 
-        {
-            // Start process monitoring after apps are loaded
-            _processCheckTimer.Start();
-            if (_settings.GlobalAutoSaveEnabled)
-            {
-                _backupTimer.Start();
-                Debug.WriteLine($"Auto-save enabled with {_settings.AutoSaveInterval} minute interval");
-            }
-            UpdateRunningApplications();
-            StartBackgroundAppRefresh(); // Start background refresh after initial load
-        });
-
+        // Program search will be initialized after Terms are accepted
+        // See App.axaml.cs for the logic that enables search and calls InitializeApplicationSearch()
+        
         ExitApplicationCommand = new RelayCommand(() => 
         {
             IsExiting = true;
@@ -309,6 +303,33 @@ public partial class MainWindowViewModel : ViewModelBase
         });
     }
 
+    // Add a method to initialize the application search
+    public void InitializeApplicationSearch()
+    {
+        // Check if search is enabled
+        if (!IsSearchEnabled)
+        {
+            Services.LoggingService.Instance.Info("Program search is disabled, skipping initialization");
+            return;
+        }
+        
+        Services.LoggingService.Instance.Info("Initializing application search");
+        
+        // Load the installed applications
+        Task.Run(LoadInstalledAppsAsync).ContinueWith(_ => 
+        {
+            // Start process monitoring after apps are loaded
+            _processCheckTimer.Start();
+            if (_settings.GlobalAutoSaveEnabled)
+            {
+                _backupTimer.Start();
+                Debug.WriteLine($"Auto-save enabled with {_settings.AutoSaveInterval} minute interval");
+            }
+            UpdateRunningApplications();
+            StartBackgroundAppRefresh(); // Start background refresh after initial load
+        });
+    }
+    
     public void Initialize(Window window)
     {
         _mainWindow = window;

@@ -237,6 +237,18 @@ public class Settings
             QueueSave();
         }
     }
+    
+    // Last check for notifications
+    private DateTime _lastNotificationCheck = DateTime.MinValue;
+    public DateTime LastNotificationCheck
+    {
+        get => _lastNotificationCheck;
+        set
+        {
+            _lastNotificationCheck = value;
+            QueueSave();
+        }
+    }
 
     private DateTime _legalAcceptanceDate = DateTime.Parse("2025-05-24");  // Default to initial acceptance date
     public DateTime LegalAcceptanceDate
@@ -462,6 +474,18 @@ public class Settings
             QueueSave();
         }
     }
+    
+    // Notification storage
+    private List<Notification> _notifications = new();
+    public List<Notification> Notifications
+    {
+        get => _notifications;
+        set
+        {
+            _notifications = value;
+            QueueSave();
+        }
+    }
 
     // Backup history storage
     private Dictionary<string, List<SaveBackupInfo>> _backupHistory = new();
@@ -573,6 +597,7 @@ public class Settings
             settings.AppSettings ??= new();
             settings.BackupHistory ??= new();
             settings.LastFileStates ??= new();
+            settings.Notifications ??= new();
 
             // Set default values for any unset properties
             if (string.IsNullOrEmpty(settings.SortOption))

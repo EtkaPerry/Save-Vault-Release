@@ -22,6 +22,10 @@
             <Setter Property="Foreground" Value="{DynamicResource TextColor}" />
         </Style>
     </Window.Styles>
+    
+    <Window.Resources>
+        <utils:BoolToColorBrushConverter x:Key="BoolToColorConverter"/>
+    </Window.Resources>
 
     <Design.DataContext>
         <!-- This only sets the DataContext for the previewer in an IDE,
@@ -168,12 +172,39 @@
                             <!-- Home section background -->
                             <Border Grid.ColumnSpan="3" 
                                    Background="{DynamicResource ListItemBackground}" 
-                                   CornerRadius="4"/>                              <!-- Logo Button with Dropdown Menu -->                            <Button Grid.Column="0"
+                                   CornerRadius="4"/>
+                                   
+                            <!-- Logo Button with Dropdown Menu -->
+                            <Button Grid.Column="0"
                                     Name="LogoButton"
                                     Background="Transparent" 
                                     BorderThickness="0"
                                     Padding="8"
-                                    VerticalAlignment="Stretch"                                    VerticalContentAlignment="Center">                                <Button.Flyout>
+                                    VerticalAlignment="Stretch"
+                                    VerticalContentAlignment="Center">
+                                <Button.Content>
+                                    <Grid>
+                                        <!-- Logo Image -->
+                                        <Image Source="/Assets/Logo.png" Width="20" Height="20"/>
+                                        
+                                        <!-- Update Notification Indicator -->
+                                        <Ellipse Width="8" Height="8" 
+                                                Fill="#FF5252" 
+                                                HorizontalAlignment="Right" 
+                                                VerticalAlignment="Top" 
+                                                Margin="0,-3,-3,0"
+                                                IsVisible="{Binding UpdateAvailable}"/>
+                                    
+                                    <!-- Notification Indicator -->
+                                    <Ellipse Width="8" Height="8" 
+                                            Fill="#FF5252" 
+                                            HorizontalAlignment="Right" 
+                                            VerticalAlignment="Bottom" 
+                                            Margin="0,0,-3,-3"
+                                            IsVisible="{Binding HasUnreadNotifications}"/>
+                                    </Grid>
+                                </Button.Content>
+                                <Button.Flyout>
                                     <MenuFlyout Placement="BottomEdgeAlignedLeft">
                                         <!-- Update status menu item - changes appearance based on update availability -->
                                         <MenuItem MinWidth="260" Command="{Binding CheckForUpdatesCommand}">
@@ -192,6 +223,27 @@
                                                         <TextBlock Text="Download the Update" 
                                                                  Foreground="#FF9800"
                                                                  IsVisible="{Binding UpdateAvailable}" />
+                                                    </StackPanel>
+                                                </Grid>
+                                            </MenuItem.Header>
+                                        </MenuItem>
+                                        
+                                        <!-- Notifications menu item with icon -->
+                                        <MenuItem MinWidth="260" Command="{Binding ShowNotificationsCommand}">
+                                            <MenuItem.Header>
+                                                <Grid ColumnDefinitions="Auto,*">
+                                                    <Image Grid.Column="0" 
+                                                           Source="{DynamicResource bell.png}" 
+                                                           Width="16" Height="16" 
+                                                           Margin="0,0,12,0"/>
+                                                    
+                                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                        <TextBlock Text="Notifications" 
+                                                                 Foreground="{Binding HasUnreadNotifications, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#FF5252,#FFFFFF'}" />
+                                                        
+                                                        <TextBlock Text=" (new)" 
+                                                                 Foreground="#FF5252"
+                                                                 IsVisible="{Binding HasUnreadNotifications}" />
                                                     </StackPanel>
                                                 </Grid>
                                             </MenuItem.Header>
@@ -752,10 +804,73 @@
                                      Foreground="{DynamicResource SecondaryTextColor}"
                                      FontSize="16"
                                      HorizontalAlignment="Center"/>
-                        </StackPanel>
-
-                        <!-- App Details State -->
-                        <Grid IsVisible="{Binding !!SelectedApp}">
+                        </StackPanel>                        <!-- Notifications Panel -->
+                        <Grid IsVisible="{Binding IsNotificationsVisible}" Background="{DynamicResource MainBackground}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>                            <!-- Header -->
+                            <DockPanel Grid.Row="0" Margin="20,20,20,10">
+                                <TextBlock Text="Notifications" 
+                                         FontSize="24" 
+                                         FontWeight="Bold" 
+                                         DockPanel.Dock="Left"/>
+                                
+                                <StackPanel Orientation="Horizontal" 
+                                          DockPanel.Dock="Right" 
+                                          HorizontalAlignment="Right"
+                                          Spacing="8">
+                                    <!-- Refresh Button -->
+                                    <Button Command="{Binding CheckForNotificationsCommand}"
+                                           ToolTip.Tip="Refresh Notifications"
+                                           Width="32" Height="32"
+                                           Padding="4"
+                                           Background="{DynamicResource ListItemBackground}">
+                                        <Image Source="{DynamicResource refresh.png}" Width="16" Height="16"/>
+                                    </Button>
+                                      <!-- Mark All as Read Button (Always visible) -->
+                                    <Button Content="Read All" 
+                                          Command="{Binding MarkAllNotificationsAsReadCommand}"/>
+                                </StackPanel>
+                            </DockPanel>
+                              <!-- Notifications List -->
+                            <ListBox Grid.Row="1" 
+                                    ItemsSource="{Binding Notifications}" 
+                                    SelectedItem="{Binding SelectedNotification}"
+                                    Background="Transparent" 
+                                    BorderThickness="0"
+                                    Margin="20,0,20,20">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Padding="10" 
+                                              Margin="0,5" 
+                                              Background="{DynamicResource CardBackground}" 
+                                              CornerRadius="4"
+                                              BorderBrush="{Binding IsRead, Converter={StaticResource BoolToColorConverter}, ConverterParameter='Transparent,#FF5252'}"
+                                              BorderThickness="1">
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                
+                                                <TextBlock Grid.Row="0" 
+                                                         Text="{Binding Message}" 
+                                                         TextWrapping="Wrap" 
+                                                         FontWeight="Normal"/>
+                                                  <TextBlock Grid.Row="1" 
+                                                         Text="{Binding Date, StringFormat={}{0:g}}" 
+                                                         Margin="0,5,0,0" 
+                                                         Foreground="{DynamicResource SecondaryTextColor}" 
+                                                         FontSize="12"/>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>                        <!-- App Details State -->
+                        <Grid IsVisible="{Binding !!SelectedApp}" Background="{DynamicResource MainBackground}">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="50*"/>
                                 <ColumnDefinition Width="50*"/>

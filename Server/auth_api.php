@@ -19,7 +19,9 @@ require_once 'jwt_helper.php';
 header('Access-Control-Allow-Origin: *');
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('Access-Control-Max-Age: 86400'); // Cache preflight response for 24 hours
+header('Access-Control-Max-Age: 86400'); // Cache preflight response for 24 hours
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
@@ -40,22 +42,34 @@ error_log("REQUEST_METHOD: " . $requestMethod);
 // Parse the request path
 $path = parse_url($requestUri, PHP_URL_PATH);
 error_log("Path from parse_url: " . $path);
+error_log("QUERY_STRING: " . $_SERVER['QUERY_STRING']);
 
 // Extract final part of path after auth_api.php/
 if (strpos($path, 'auth_api.php/') !== false) {
     $path = substr($path, strpos($path, 'auth_api.php/') + strlen('auth_api.php/'));
     error_log("Path after auth_api.php/: " . $path);
-} else {
-    // Check if there's a query string endpoint
-    if (isset($_GET) && !empty($_GET)) {
-        // Get the first key in the query string as the endpoint
-        reset($_GET);
-        $path = key($_GET);
-        error_log("Path from query string: " . $path);
-    } else {
-        $path = '';
-        error_log("No path found in URL");
+} else {// Check if there's a query string endpoint
+if (isset($_GET) && !empty($_GET)) {
+    // Get the first key in the query string as the endpoint
+    reset($_GET);
+    $path = key($_GET);
+    error_log("Path from query string key: '" . $path . "'");
+    error_log("Full query string: '" . $_SERVER['QUERY_STRING'] . "'");
+    
+    // If query parameter is passed without a value (like ?admin), use it as the path
+    if ($path === '0' && isset($_SERVER['QUERY_STRING'])) {
+        $queryString = $_SERVER['QUERY_STRING'];
+        if (!empty($queryString)) {
+            // Extract the endpoint name (before any = sign)
+            $parts = explode('=', $queryString, 2);
+            $path = $parts[0];
+            error_log("Path from query string without value: '" . $path . "'");
+        }
     }
+} else {
+    $path = '';
+    error_log("No path found in URL");
+}
 }
 
 // Clean up path by removing any additional slashes
@@ -105,6 +119,15 @@ function sendResponse($success, $message, $data = null, $statusCode = 200) {
 }
 
 // Route the request based on path and method
+error_log("Path for routing: '" . $path . "'");
+error_log("Request method: '" . $requestMethod . "'");
+
+// Special case for 'admin' in query string
+if (strpos($_SERVER['QUERY_STRING'], 'admin') === 0) {
+    $path = 'admin';
+    error_log("Setting path to 'admin' based on query string");
+}
+
 switch ($path) {
     case 'login':
         if ($requestMethod === 'POST') {
@@ -832,9 +855,19 @@ function handleForgotPassword() {
  * Extract JWT token from Authorization header
  */
 function extractToken($authHeader) {
-    if (!$authHeader || !preg_match('/^Bearer\s+(.*?)$/', $authHeader, $matches)) {
+    error_log("Extracting token from auth header: " . ($authHeader ? substr($authHeader, 0, 20) . '...' : 'none'));
+    
+    if (!$authHeader) {
+        error_log("Token extraction failed: No auth header provided");
         return null;
     }
+    
+    if (!preg_match('/^Bearer\s+(.*?)$/', $authHeader, $matches)) {
+        error_log("Token extraction failed: Auth header does not match Bearer pattern");
+        return null;
+    }
+    
+    error_log("Token successfully extracted, length: " . strlen($matches[1]));
     
     return $matches[1];
 }
@@ -843,19 +876,23 @@ function extractToken($authHeader) {
  * Authenticate request and return user data or send error response
  */
 function authenticateRequest($authHeader) {
+    error_log("Authenticating request with auth header: " . ($authHeader ? substr($authHeader, 0, 20) . '...' : 'none'));
+    
     $token = extractToken($authHeader);
     
     if (!$token) {
-        sendResponse(false, 'No token provided', null, 401);
+        error_log("Authentication failed: No token provided");
         return null;
     }
     
     $userData = validateJWT($token);
     
     if (!$userData) {
-        sendResponse(false, 'Invalid or expired token', null, 401);
+        error_log("Authentication failed: Invalid or expired token");
         return null;
     }
+    
+    error_log("Authentication successful for user ID: " . $userData->sub);
     
     return $userData;
 }
@@ -903,14 +940,23 @@ function handleProfilePhotoUpload($authHeader) {
  * Handle admin request with admin verification
  */
 function handleAdminRequest($authHeader) {
+    error_log("Handling admin request with auth header: " . substr($authHeader, 0, 20) . '...');
+    
     $userData = authenticateRequest($authHeader);
-    if (!$userData) return;
+    if (!$userData) {
+        error_log("Admin request failed: Authentication failed");
+        sendResponse(false, 'Authentication required', null, 401);
+        return;
+    }
     
     // Check if user is admin
     if (!isset($userData->admin) || !$userData->admin) {
+        error_log("Admin request failed: User is not an admin");
         sendResponse(false, 'Unauthorized: Admin privileges required', null, 403);
         return;
     }
+    
+    error_log("Admin request successful: User ID " . $userData->sub . " is an admin");
     
     global $db;
     

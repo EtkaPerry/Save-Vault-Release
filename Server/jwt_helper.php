@@ -64,10 +64,13 @@ function generateJWT($userId, $username, $issuedAt, $expire, $isAdmin = false) {
 function validateJWT($token, $allowExpired = false) {
     global $JWT_SECRET;
     
+    error_log("Validating JWT token, length: " . strlen($token));
+    
     // Split token into parts
     $tokenParts = explode('.', $token);
     
     if (count($tokenParts) !== 3) {
+        error_log("JWT validation failed: Invalid token format (expected 3 parts, got " . count($tokenParts) . ")");
         return false; // Invalid token format
     }
     
@@ -78,23 +81,30 @@ function validateJWT($token, $allowExpired = false) {
     $expectedSignature = hash_hmac('sha256', "$base64UrlHeader.$base64UrlPayload", $JWT_SECRET, true);
     
     if (!hash_equals($signature, $expectedSignature)) {
+        error_log("JWT validation failed: Invalid signature");
         return false; // Invalid signature
     }
     
     // Decode payload
-    $payload = json_decode(base64UrlDecode($base64UrlPayload));
+    $decodedPayload = base64UrlDecode($base64UrlPayload);
+    $payload = json_decode($decodedPayload);
     
     if (!$payload) {
+        error_log("JWT validation failed: Invalid payload JSON: " . substr($decodedPayload, 0, 30) . "...");
         return false; // Invalid payload
     }
     
     // Check expiration
     if (!$allowExpired && isset($payload->exp) && $payload->exp < time()) {
+        error_log("JWT validation failed: Token expired. Expiry: " . date('Y-m-d H:i:s', $payload->exp) . ", Current: " . date('Y-m-d H:i:s'));
         return false; // Token expired
     }
     
-    // Add userId for convenience
+    // Add userId and id for convenience and backward compatibility
     $payload->userId = $payload->sub;
+    $payload->id = $payload->sub; // Add id property that matches sub
+    
+    error_log("JWT validation successful for user ID: " . $payload->sub);
     
     return $payload;
 }

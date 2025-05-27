@@ -191,6 +191,9 @@ public partial class App : Application
             // Check for updates if enabled
             _ = viewModel.InitializeUpdateCheck();
             
+            // Check for notifications
+            _ = Services.NotificationService.Instance.CheckForNotificationsIfNeeded();
+            
             // Show Terms and Conditions if not accepted yet
             if (!settings.TermsAccepted)
             {

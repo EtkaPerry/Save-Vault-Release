@@ -252,6 +252,33 @@ public partial class MainWindowViewModel : ViewModelBase
         updateService.DownloadProgressChanged += (s, progress) => {
             DownloadProgress = progress;
         };
+          // Initialize notification service
+        var notificationService = NotificationService.Instance;
+        notificationService.UnreadNotificationsChanged += (s, hasUnread) => {
+            HasUnreadNotifications = hasUnread;
+        };        
+        
+        notificationService.NotificationsUpdated += (s, notifications) => {
+            Notifications.Clear();
+            
+            // Add notifications from the list which is already sorted (newest first)
+            foreach (var notification in notifications)
+            {
+                Notifications.Add(notification);
+            }
+        };
+        
+        // Load initial notifications from notification service
+        var initialNotifications = notificationService.GetNotifications();
+        if (initialNotifications.Any())
+        {
+            Notifications.Clear();
+            foreach (var notification in initialNotifications)
+            {
+                Notifications.Add(notification);
+            }
+            HasUnreadNotifications = initialNotifications.Any(n => !n.IsRead);
+        }
         
         // Initialize backup root folder
         _backupRootFolder = Path.Combine(
@@ -3046,12 +3073,18 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         IsLoginPopupOpen = true;
     }
-    
-    [RelayCommand]
+      [RelayCommand]
     private void ShowHome()
     {
         // Clear the selected app to show the empty screen
         SelectedApp = null;
+        
+        // Hide notifications panel if it's visible
+        if (IsNotificationsVisible)
+        {
+            IsNotificationsVisible = false;
+        }
+        
         StatusMessage = "Home";
     }
       
@@ -3512,6 +3545,18 @@ public partial class MainWindowViewModel : ViewModelBase
     public IRelayCommand OpenSaveCarrierCommand => OpenSaveCarrierCommandImpl ??= new RelayCommand(OpenSaveCarrier);
     private IRelayCommand? OpenSaveCarrierCommandImpl;
     
+    public IRelayCommand ShowNotificationsCommand => ShowNotificationsCommandImpl ??= new RelayCommand(ShowNotifications);
+    private IRelayCommand? ShowNotificationsCommandImpl;
+    
+    public IRelayCommand MarkAllNotificationsAsReadCommand => MarkAllNotificationsAsReadCommandImpl ??= new RelayCommand(MarkAllNotificationsAsRead);
+    private IRelayCommand? MarkAllNotificationsAsReadCommandImpl;
+    
+    public IRelayCommand CheckForNotificationsCommand => CheckForNotificationsCommandImpl ??= new RelayCommand(CheckForNotifications);
+    private IRelayCommand? CheckForNotificationsCommandImpl;
+    
+    public IRelayCommand<int> MarkAsReadCommand => MarkAsReadCommandImpl ??= new RelayCommand<int>(MarkAsRead);
+    private IRelayCommand<int>? MarkAsReadCommandImpl;
+    
     private void OpenLogViewer()
     {
         var logViewerWindow = new Views.LogViewerWindow();
@@ -3523,6 +3568,36 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             logViewerWindow.Show();
         }
+    }
+    
+    private void ShowNotifications()
+    {
+        // Show notifications panel
+        IsNotificationsVisible = true;
+        
+        // Hide the "Select an application" message
+        SelectedApp = null;
+        
+        // Set status message
+        StatusMessage = "Notifications";
+    }
+    
+    private void MarkAllNotificationsAsRead()
+    {
+        // Mark all notifications as read
+        NotificationService.Instance.MarkAllAsRead();
+    }
+    
+    private void MarkAsRead(int notificationId)
+    {
+        // Mark a specific notification as read
+        NotificationService.Instance.MarkAsRead(notificationId);
+    }
+    
+    private void CheckForNotifications()
+    {
+        // Check for new notifications
+        _ = NotificationService.Instance.CheckForNotifications();
     }
     
     private void OpenSaveCarrier()
@@ -3598,6 +3673,44 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         get => _updateVersion;
         set => this.RaiseAndSetIfChanged(ref _updateVersion, value);
+    }
+    
+    // Notification properties
+    private bool _hasUnreadNotifications;
+    public bool HasUnreadNotifications
+    {
+        get => _hasUnreadNotifications;
+        set => this.RaiseAndSetIfChanged(ref _hasUnreadNotifications, value);
+    }
+    
+    private ObservableCollection<Notification> _notifications = new();
+    public ObservableCollection<Notification> Notifications
+    {
+        get => _notifications;
+        set => this.RaiseAndSetIfChanged(ref _notifications, value);
+    }
+      private Notification? _selectedNotification;
+    public Notification? SelectedNotification
+    {
+        get => _selectedNotification;
+        set 
+        {
+            this.RaiseAndSetIfChanged(ref _selectedNotification, value);
+            
+            // If a notification is selected and it's not read, mark it as read
+            if (value != null && !value.IsRead)
+            {
+                // Mark the notification as read using the service
+                NotificationService.Instance.MarkAsRead(value.Id);
+            }
+        }
+    }
+    
+    private bool _isNotificationsVisible;
+    public bool IsNotificationsVisible
+    {
+        get => _isNotificationsVisible;
+        set => this.RaiseAndSetIfChanged(ref _isNotificationsVisible, value);
     }
     
     // Update commands

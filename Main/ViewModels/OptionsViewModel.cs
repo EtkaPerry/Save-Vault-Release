@@ -200,8 +200,7 @@ public partial class OptionsViewModel : ViewModelBase
         _globalAutoSaveEnabled = _settings.GlobalAutoSaveEnabled;
         _startSaveEnabled = _settings.StartSaveEnabled;
         _changeDetectionEnabled = _settings.ChangeDetectionEnabled;
-        _maxAutoSaves = _settings.MaxAutoSaves;
-        _maxStartSaves = _settings.MaxStartSaves;
+        _maxAutoSaves = _settings.MaxAutoSaves;        _maxStartSaves = _settings.MaxStartSaves;
         _selectedTheme = _settings.Theme ?? "System";
         _backupStorageLocation = _settings.BackupStorageLocation;
         
@@ -577,5 +576,4 @@ public partial class OptionsViewModel : ViewModelBase
         _settings.LegalAcceptanceDate = DateTime.Now;
         SaveChanges();
         this.RaisePropertyChanged(nameof(LegalAcceptanceDate));
-    }
-}
+    }}

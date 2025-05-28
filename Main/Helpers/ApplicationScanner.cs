@@ -35,17 +35,17 @@ namespace SaveVaultApp.Helpers
             // Initialize search paths
             var searchPaths = new List<string>();
             LoggingService.Instance.Info("Starting enhanced application discovery scan...");
-            
-            // Scan for known games first
+              // Scan for known games first
             try
             {
-                LoggingService.Instance.Info("Scanning for known games based on folder patterns...");
+                // Scanning known games without logging the scan process to reduce log noise
                 var knownGames = SaveLocationDetector.ScanForKnownGames(settings, processedExecutables);
                 foreach (var game in knownGames)
                 {
                     AddAppSafely(game);
                 }
-                LoggingService.Instance.Info($"Found {knownGames.Count} games based on folder patterns");
+                // Log only the count of known games found (still useful information)
+                LoggingService.Instance.Info($"Found {knownGames.Count} known games based on folder patterns");
             }
             catch (Exception ex)
             {

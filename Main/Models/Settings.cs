@@ -215,7 +215,32 @@ public class Settings
             _autoCheckUpdates = value;
             QueueSave();
         }
+    }    // Offline mode setting
+    private bool _offlineMode = false;
+    public bool OfflineMode
+    {
+        get => _offlineMode;
+        set
+        {
+            if (_offlineMode != value)
+            {
+                var previousValue = _offlineMode;
+                _offlineMode = value;
+                
+                // Log the change through both Debug and LoggingService
+                Debug.WriteLine($"OfflineMode changed from {previousValue} to {value}");
+                var logger = Services.LoggingService.Instance;
+                if (logger != null)
+                {
+                    logger.Info($"Offline mode {(value ? "enabled" : "disabled")} - auto-saving settings");
+                }
+                
+                QueueSave();
+            }
+        }
     }
+    
+    // Online status is always remembered between sessions as the default behavior
 
     // Add change detection before backup setting
     private bool _changeDetectionEnabled = true;
@@ -562,8 +587,8 @@ public class Settings
                 Debug.WriteLine($"Creating settings directory during load: {directory}");
                 Directory.CreateDirectory(directory);
             }
-            
-            Settings settings;
+              Settings settings;
+            bool isFirstRun = !File.Exists(SettingsPath);
             
             if (File.Exists(SettingsPath))
             {
@@ -619,12 +644,16 @@ public class Settings
                 settings.BackupStorageLocation = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "SaveVault", "Backups");
-            
-            if (settings.UpdateCheckInterval <= 0)
+              if (settings.UpdateCheckInterval <= 0)
                 settings.UpdateCheckInterval = 24;
             
-            // Set default for change detection (on by default)
-            settings.ChangeDetectionEnabled = true;
+            // Set default for change detection (on by default) - only on first run
+            if (isFirstRun)
+            {                settings.ChangeDetectionEnabled = true;
+                // On first run, default to online mode
+                settings.OfflineMode = false;
+                // Online status is always remembered
+            }
 
             // Set this as the static instance
             _instance = settings;
@@ -721,15 +750,29 @@ public class Settings
             _hasUnsavedChanges = true;
             Debug.WriteLine("Settings change queued for save");
             
+            var logger = Services.LoggingService.Instance;
+            if (logger != null)
+            {
+                logger.Debug("Settings change detected - queueing auto-save");
+            }
+            
             // If we're the static instance, save now
             if (this == _instance)
             {
                 Debug.WriteLine("Settings is static instance, saving immediately");
+                if (logger != null)
+                {
+                    logger.Debug("Triggering immediate settings save (static instance)");
+                }
                 Save();
             }
             else
             {
                 Debug.WriteLine("WARNING: Settings change on non-static instance");
+                if (logger != null)
+                {
+                    logger.Warning("Settings change on non-static instance - attempting to save through static instance");
+                }
                 // Try to save through the static instance
                 if (_instance != null)
                 {
@@ -738,6 +781,10 @@ public class Settings
                 else
                 {
                     Debug.WriteLine("CRITICAL: No static settings instance available!");
+                    if (logger != null)
+                    {
+                        logger.Error("CRITICAL: No static settings instance available for auto-save!");
+                    }
                 }
             }
         }
@@ -756,6 +803,11 @@ public class Settings
             try
             {
                 Debug.WriteLine($"Saving settings to: {SettingsPath}");
+                var logger = Services.LoggingService.Instance;
+                if (logger != null)
+                {
+                    logger.Info($"Auto-saving settings to: {Path.GetFileName(SettingsPath)}");
+                }
                 
                 var directory = Path.GetDirectoryName(SettingsPath);
                 if (!Directory.Exists(directory) && directory != null)
@@ -803,19 +855,19 @@ public class Settings
 
                 Debug.WriteLine("Settings saved successfully");
 
-                var logger = Services.LoggingService.Instance;
                 if (logger != null)
                 {
-                    // Log key settings values after save
-                    logger.Debug($"Settings saved - AutoSaveInterval: {AutoSaveInterval}, GlobalAutoSaveEnabled: {GlobalAutoSaveEnabled}");
+                    // Log key settings values after save including offline mode
+                    logger.Info($"Settings auto-saved successfully - OfflineMode: {OfflineMode}, AutoSaveInterval: {AutoSaveInterval}, GlobalAutoSaveEnabled: {GlobalAutoSaveEnabled}");
                 }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"Error saving settings: {ex.Message}");
-                if (Services.LoggingService.Instance != null)
+                var logger = Services.LoggingService.Instance;
+                if (logger != null)
                 {
-                    Services.LoggingService.Instance.Error($"Failed to save settings: {ex.Message}");
+                    logger.Error($"Failed to auto-save settings: {ex.Message}");
                 }
             }
         }
@@ -839,9 +891,9 @@ public class Settings
         logger.Debug($"Theme: {Theme}");
         logger.Debug($"SortOption: {SortOption}");
         logger.Debug($"HiddenGamesExpanded: {HiddenGamesExpanded}");
-        logger.Debug($"GlobalAutoSaveEnabled: {GlobalAutoSaveEnabled}");
-        logger.Debug($"StartSaveEnabled: {StartSaveEnabled}");
+        logger.Debug($"GlobalAutoSaveEnabled: {GlobalAutoSaveEnabled}");        logger.Debug($"StartSaveEnabled: {StartSaveEnabled}");
         logger.Debug($"ChangeDetectionEnabled: {ChangeDetectionEnabled}");
+        logger.Debug($"OfflineMode: {OfflineMode}");
         logger.Debug($"AutoSaveInterval: {AutoSaveInterval}");
         logger.Debug($"MaxAutoSaves: {MaxAutoSaves}");
         logger.Debug($"MaxStartSaves: {MaxStartSaves}");

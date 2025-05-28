@@ -56,16 +56,39 @@
             <Border Grid.Column="1" Name="DragRegion" Background="Transparent">
                 <TextBlock Text="Save Vault" VerticalAlignment="Center" HorizontalAlignment="Center" />
             </Border>
-            
-            <!-- Window Control Buttons -->
-            <StackPanel Grid.Column="2" Orientation="Horizontal">
-                <Button Width="45" Height="30" Background="Transparent" BorderThickness="0" Padding="0" Name="MinimizeButton">
+              <!-- Window Control Buttons -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center"><!-- Online/Offline Toggle Button -->                <Button Width="95" Height="28" 
+                        Background="Transparent" 
+                        BorderThickness="1"
+                        BorderBrush="{Binding IsOfflineMode, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#FF9800,#4CAF50'}"
+                        Foreground="{Binding IsOfflineMode, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#FF9800,#4CAF50'}"
+                        Padding="6,0" 
+                        Margin="0,0,5,0"
+                        VerticalAlignment="Center"
+                        CornerRadius="4"
+                        Command="{Binding ToggleOfflineModeCommand}"
+                        ToolTip.Tip="{Binding IsOfflineMode, Converter={x:Static utils:BoolToStringConverter.Instance}, ConverterParameter='Go online,Go offline'}">                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="0,0,0,0">
+                        <Image Source="{DynamicResource logedout.png}" 
+                               Width="16" 
+                               Height="16" 
+                               IsVisible="{Binding IsOfflineMode}"
+                               VerticalAlignment="Center"/>
+                        <Image Source="{DynamicResource logedin.png}" 
+                               Width="16" 
+                               Height="16" 
+                               IsVisible="{Binding !IsOfflineMode}"
+                               VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding IsOfflineMode, Converter={x:Static utils:BoolToStringConverter.Instance}, ConverterParameter='Offline,Online'}" 
+                                  FontSize="12" 
+                                  VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>                <Button Width="45" Height="28" Background="Transparent" BorderThickness="0" Padding="0" Name="MinimizeButton" VerticalAlignment="Center">
                     <Path Data="M 0,0 H 10" Stroke="{DynamicResource TextColor}" StrokeThickness="1" VerticalAlignment="Center" HorizontalAlignment="Center" />
                 </Button>
-                <Button Width="45" Height="30" Background="Transparent" BorderThickness="0" Padding="0" Name="MaximizeButton">
+                <Button Width="45" Height="28" Background="Transparent" BorderThickness="0" Padding="0" Name="MaximizeButton" VerticalAlignment="Center">
                     <Path Data="M 0,0 H 10 V 10 H 0 Z" Stroke="{DynamicResource TextColor}" StrokeThickness="1" Fill="Transparent" VerticalAlignment="Center" HorizontalAlignment="Center" />
                 </Button>
-                <Button Width="45" Height="30" Background="Transparent" BorderThickness="0" Padding="0" Name="CloseButton">
+                <Button Width="45" Height="28" Background="Transparent" BorderThickness="0" Padding="0" Name="CloseButton" VerticalAlignment="Center">
                     <Path Data="M 0,0 L 10,10 M 0,10 L 10,0" Stroke="{DynamicResource TextColor}" StrokeThickness="1" VerticalAlignment="Center" HorizontalAlignment="Center" />
                 </Button>
             </StackPanel>
@@ -193,15 +216,19 @@
                                                 HorizontalAlignment="Right" 
                                                 VerticalAlignment="Top" 
                                                 Margin="0,-3,-3,0"
-                                                IsVisible="{Binding UpdateAvailable}"/>
-                                    
-                                    <!-- Notification Indicator -->
+                                                IsVisible="{Binding UpdateAvailable}"/>                                    <!-- Notification Indicator - hidden in offline mode -->
                                     <Ellipse Width="8" Height="8" 
                                             Fill="#FF5252" 
                                             HorizontalAlignment="Right" 
                                             VerticalAlignment="Bottom" 
-                                            Margin="0,0,-3,-3"
-                                            IsVisible="{Binding HasUnreadNotifications}"/>
+                                            Margin="0,0,-3,-3">
+                                        <Ellipse.IsVisible>
+                                            <MultiBinding Converter="{x:Static utils:BoolAndBoolConverter.Instance}">
+                                                <Binding Path="HasUnreadNotifications"/>
+                                                <Binding Path="!IsOfflineMode"/>
+                                            </MultiBinding>
+                                        </Ellipse.IsVisible>
+                                    </Ellipse>
                                     </Grid>
                                 </Button.Content>
                                 <Button.Flyout>
@@ -227,19 +254,23 @@
                                                 </Grid>
                                             </MenuItem.Header>
                                         </MenuItem>
-                                        
-                                        <!-- Notifications menu item with icon -->
-                                        <MenuItem MinWidth="260" Command="{Binding ShowNotificationsCommand}">
+                                          <!-- Notifications menu item with icon - hidden in offline mode -->
+                                        <MenuItem MinWidth="260" Command="{Binding ShowNotificationsCommand}" IsVisible="{Binding !IsOfflineMode}">
                                             <MenuItem.Header>
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <Image Grid.Column="0" 
                                                            Source="{DynamicResource bell.png}" 
                                                            Width="16" Height="16" 
-                                                           Margin="0,0,12,0"/>
-                                                    
-                                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                           Margin="0,0,12,0"/>                                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                        <!-- Show red text when there are unread notifications -->
                                                         <TextBlock Text="Notifications" 
-                                                                 Foreground="{Binding HasUnreadNotifications, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#FF5252,#FFFFFF'}" />
+                                                                 Foreground="#FF5252"
+                                                                 IsVisible="{Binding HasUnreadNotifications}" />
+                                                        
+                                                        <!-- Show theme color text when there are no unread notifications -->
+                                                        <TextBlock Text="Notifications" 
+                                                                 Foreground="{DynamicResource TextColor}"
+                                                                 IsVisible="{Binding !HasUnreadNotifications}" />
                                                         
                                                         <TextBlock Text=" (new)" 
                                                                  Foreground="#FF5252"
@@ -715,7 +746,7 @@
                                         <TextBlock Text="Show" IsVisible="{Binding SelectedApp.IsHidden}" />
                                     </StackPanel>
                                 </Button>                            </StackPanel>                              <!-- Enhanced Profile dropdown on the right -->
-                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">                                <!-- Login button - shown when not logged in -->
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">                                <!-- Login button - shown when not logged in and not in offline mode -->
                                 <Button Command="{Binding ShowLoginPopupCommand}"
                                         BorderThickness="1"
                                         BorderBrush="#FF9800"
@@ -725,13 +756,18 @@
                                         Padding="10,4"
                                         Height="32"
                                         CornerRadius="6"
-                                        VerticalAlignment="Center"
-                                        IsVisible="{Binding !IsLoggedIn}">
+                                        VerticalAlignment="Center">
+                                    <Button.IsVisible>
+                                        <MultiBinding Converter="{x:Static utils:BoolAndBoolConverter.Instance}">
+                                            <Binding Path="!IsLoggedIn"/>
+                                            <Binding Path="!IsOfflineMode"/>
+                                        </MultiBinding>
+                                    </Button.IsVisible>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <PathIcon Data="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z" 
                                                  Width="16" Height="16" 
                                                  Foreground="#FF9800"/>
-                                        <TextBlock Text="Sign In" 
+                                        <TextBlock Text="Login" 
                                                   VerticalAlignment="Center" 
                                                   FontWeight="Medium"
                                                   Foreground="#FF9800"/>

@@ -157,14 +157,19 @@ public partial class MainWindowViewModel : ViewModelBase
         set => this.RaiseAndSetIfChanged(ref _email, value);
     }
     
-    public bool IsLoggedIn => !string.IsNullOrEmpty(_settings.LoggedInUser);
+    public bool IsLoggedIn => !string.IsNullOrEmpty(_settings.LoggedInUser) && !_settings.OfflineMode;
     
-    public string LoginStatusText => IsLoggedIn ? $"Logged in as {_settings.LoggedInUser}" : "Login";
+    public string LoginStatusText => 
+        _settings.OfflineMode ? "Go Online" : 
+        (IsLoggedIn ? $"Logged in as {_settings.LoggedInUser}" : "Login");
     
     // Property to get the first letter of the logged-in username for the avatar
     public string LoggedInInitial => IsLoggedIn && !string.IsNullOrEmpty(_settings.LoggedInUser) 
         ? _settings.LoggedInUser.Substring(0, 1).ToUpper() 
         : "?";
+        
+    // Property to check if we're in offline mode
+    public bool IsOfflineMode => _settings.OfflineMode;
 
     // Changed to internal to allow access from App.axaml.cs
     internal Window? _mainWindow; 
@@ -257,6 +262,16 @@ public partial class MainWindowViewModel : ViewModelBase
         notificationService.UnreadNotificationsChanged += (s, hasUnread) => {
             HasUnreadNotifications = hasUnread;
         };        
+        
+        // Set up property changed handler to watch for offline mode changes
+        this.PropertyChanged += (sender, args) => {
+            if (args.PropertyName == nameof(IsOfflineMode) && IsOfflineMode && IsNotificationsVisible) {
+                // If we go offline while viewing notifications, go back to home
+                IsNotificationsVisible = false;
+                SelectedApp = null;
+                StatusMessage = "Notifications are disabled in offline mode. Returned to home screen.";
+            }
+        };
         
         notificationService.NotificationsUpdated += (s, notifications) => {
             Notifications.Clear();
@@ -1124,30 +1139,35 @@ public partial class MainWindowViewModel : ViewModelBase
                 Debug.WriteLine(statusMessage);
                   // Log to the log viewer
                 string logMessage = $"Application scan completed: {totalPrograms} programs, {withSaveLocations} with save location";
-                Services.LoggingService.Instance.Info(logMessage);
-
-                // Log games with no save location if needed
-                var gamesWithNoSaveLocation = AllInstalledApps
+                Services.LoggingService.Instance.Info(logMessage);                // Log only known games with no save location to reduce log noise
+                var knownGamesWithNoSaveLocation = AllInstalledApps
                     .Where(app => (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown"))
+                    // Only include apps that match a known game in KnownGames.cs
+                    .Where(app => {
+                        var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                            g.Name.Equals(app.Name, StringComparison.OrdinalIgnoreCase) ||
+                            app.ExecutablePath.EndsWith(g.Executable, StringComparison.OrdinalIgnoreCase));
+                        return knownGame != null;
+                    })
                     .ToList();
                 
-                if (gamesWithNoSaveLocation.Any())
+                if (knownGamesWithNoSaveLocation.Any())
                 {
-                    string noSaveLocationList = string.Join(", ", gamesWithNoSaveLocation
+                    string noSaveLocationList = string.Join(", ", knownGamesWithNoSaveLocation
                         .Select(app => app.Name)
                         .OrderBy(name => name));
                 
                     if (noSaveLocationList.Length > 500)
                     {                            
-                        Services.LoggingService.Instance.Info($"Apps with no save location detected:");
-                        foreach (var game in gamesWithNoSaveLocation.OrderBy(app => app.Name))
+                        Services.LoggingService.Instance.Info($"Known games with no save location detected:");
+                        foreach (var game in knownGamesWithNoSaveLocation.OrderBy(app => app.Name))
                         {
                             Services.LoggingService.Instance.Info($"  - {game.Name}");
                         }
                     }
                     else
                     {
-                        Services.LoggingService.Instance.Info($"Apps with no save location detected: {noSaveLocationList}");
+                        Services.LoggingService.Instance.Info($"Known games with no save location detected: {noSaveLocationList}");
                     }
                 }
             });
@@ -1283,37 +1303,43 @@ public partial class MainWindowViewModel : ViewModelBase
             string statusMessage = $"Found {totalPrograms} programs, {withSaveLocations} with save location";
             StatusMessage = statusMessage;
             Debug.WriteLine(statusMessage);
-            
-            // Log to the log viewer with additional details about apps with no save location
+              // Log to the log viewer with additional details about apps with no save location
             string logMessage = $"Application scan completed: {totalPrograms} programs, {withSaveLocations} with save location";
             Services.LoggingService.Instance.Info(logMessage);
             
-            // Log apps with no save location if needed
-            var appsWithNoSaveLocation = AllInstalledApps
+            // Log only known games with no save location to reduce log noise
+            var knownAppsWithNoSaveLocation = AllInstalledApps
                 .Where(app => (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown"))
+                // Only include apps that match a known game in KnownGames.cs
+                .Where(app => {
+                    var knownGame = SaveVaultApp.Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+                        g.Name.Equals(app.Name, StringComparison.OrdinalIgnoreCase) ||
+                        app.ExecutablePath.EndsWith(g.Executable, StringComparison.OrdinalIgnoreCase));
+                    return knownGame != null;
+                })
                 .ToList();
             
-            if (appsWithNoSaveLocation.Any())
+            if (knownAppsWithNoSaveLocation.Any())
             {
-                // Get the list of apps with no save location, sorted alphabetically
-                string noSaveLocationList = string.Join(", ", appsWithNoSaveLocation
+                // Get the list of known apps with no save location, sorted alphabetically
+                string noSaveLocationList = string.Join(", ", knownAppsWithNoSaveLocation
                     .Select(app => app.Name)
                     .OrderBy(name => name));
                 
                 // Split into multiple log messages if the list is too long
                 if (noSaveLocationList.Length > 500)
                 {
-                    Services.LoggingService.Instance.Info($"Apps with no save location detected:");
+                    Services.LoggingService.Instance.Info($"Known games with no save location detected:");
                     
                     // Log apps in groups to avoid very long lines
-                    foreach (var app in appsWithNoSaveLocation.OrderBy(app => app.Name))
+                    foreach (var app in knownAppsWithNoSaveLocation.OrderBy(app => app.Name))
                     {
                         Services.LoggingService.Instance.Info($"  - {app.Name}");
                     }
                 }
                 else
                 {
-                    Services.LoggingService.Instance.Info($"Apps with no save location detected: {noSaveLocationList}");
+                    Services.LoggingService.Instance.Info($"Known games with no save location detected: {noSaveLocationList}");
                 }
             }
         });
@@ -2265,7 +2291,7 @@ public partial class MainWindowViewModel : ViewModelBase
     }
     
     [RelayCommand]
-    public async Task BrowseForSavePath()
+    private async Task BrowseForSavePath()
     {
         if (SelectedApp == null)
             return;
@@ -3071,7 +3097,60 @@ public partial class MainWindowViewModel : ViewModelBase
     [RelayCommand]
     private void ShowLoginPopup()
     {
+        // If in offline mode, toggle to online mode
+        if (_settings.OfflineMode)
+        {
+            ToggleOfflineMode();
+            return;
+        }
+        
+        // Otherwise show the login popup
         IsLoginPopupOpen = true;
+    }
+    
+    [RelayCommand]
+    private void ToggleOfflineMode()
+    {
+        var wasOffline = _settings.OfflineMode;
+        
+        // Log the toggle action
+        var logger = LoggingService.Instance;
+        if (logger != null)
+        {
+            logger.Info($"User toggling offline mode from {(wasOffline ? "offline" : "online")} to {(!wasOffline ? "offline" : "online")}");
+        }
+        
+        // Toggle the offline mode setting
+        _settings.OfflineMode = !_settings.OfflineMode;
+        _settings.Save();
+        
+        // Log after the change
+        if (logger != null)
+        {
+            logger.Info($"Offline mode successfully changed to: {(_settings.OfflineMode ? "offline" : "online")}");
+        }
+        
+        // Update UI properties
+        this.RaisePropertyChanged(nameof(IsOfflineMode));
+        this.RaisePropertyChanged(nameof(IsLoggedIn));
+        this.RaisePropertyChanged(nameof(LoginStatusText));
+          // Show appropriate status message
+        if (_settings.OfflineMode)
+        {
+            StatusMessage = "Switched to offline mode. Online features disabled.";
+            
+            // If we're viewing notifications, go back to home
+            if (IsNotificationsVisible)
+            {
+                IsNotificationsVisible = false;
+                SelectedApp = null;
+                StatusMessage = "Switched to offline mode. Notifications are disabled.";
+            }
+        }
+        else
+        {
+            StatusMessage = "Switched to online mode. Online features enabled.";
+        }
     }
       [RelayCommand]
     private void ShowHome()
@@ -3118,10 +3197,26 @@ public partial class MainWindowViewModel : ViewModelBase
             
             if (success && !string.IsNullOrEmpty(token))
             {
+                // Log the automatic offline mode disable during login
+                var logger = LoggingService.Instance;
+                if (logger != null)
+                {
+                    logger.Info("User successfully logged in - automatically disabling offline mode");
+                }
+                
+                // Ensure offline mode is disabled
+                _settings.OfflineMode = false;
+                
                 // Store token and username in settings
                 _settings.LoggedInUser = username;
                 _settings.AuthToken = token;
                 _settings.Save();
+                
+                // Log the completion of login
+                if (logger != null)
+                {
+                    logger.Info($"Login completed for user '{username}' - offline mode disabled, settings auto-saved");
+                }
                 
                 // Close the popup
                 IsLoginPopupOpen = false;
@@ -3133,8 +3228,10 @@ public partial class MainWindowViewModel : ViewModelBase
                 Password = string.Empty;
                 
                 // Notify UI about login status change
+                this.RaisePropertyChanged(nameof(IsOfflineMode));
                 this.RaisePropertyChanged(nameof(IsLoggedIn));
                 this.RaisePropertyChanged(nameof(LoginStatusText));
+                this.RaisePropertyChanged(nameof(LoggedInInitial));
             }
             else 
             {
@@ -3172,10 +3269,26 @@ public partial class MainWindowViewModel : ViewModelBase
             
             if (success && !string.IsNullOrWhiteSpace(token))
             {
+                // Log the automatic offline mode disable during registration
+                var logger = LoggingService.Instance;
+                if (logger != null)
+                {
+                    logger.Info("User successfully registered - automatically disabling offline mode");
+                }
+                
+                // Ensure offline mode is disabled
+                _settings.OfflineMode = false;
+                
                 // Store token and username in settings
                 _settings.LoggedInUser = username;
                 _settings.AuthToken = token;
                 _settings.Save();
+                
+                // Log the completion of registration
+                if (logger != null)
+                {
+                    logger.Info($"Registration completed for user '{username}' - offline mode disabled, settings auto-saved");
+                }
                 
                 // Close the popup
                 IsLoginPopupOpen = false;
@@ -3187,6 +3300,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 Password = string.Empty;
                 
                 // Notify UI about login status change
+                this.RaisePropertyChanged(nameof(IsOfflineMode));
                 this.RaisePropertyChanged(nameof(IsLoggedIn));
                 this.RaisePropertyChanged(nameof(LoginStatusText));
                 this.RaisePropertyChanged(nameof(LoggedInInitial));
@@ -3274,10 +3388,27 @@ public partial class MainWindowViewModel : ViewModelBase
         // Clear authentication data
         _settings.LoggedInUser = null;
         _settings.AuthToken = null;
+        
+        // Log the automatic offline mode switch during logout
+        var logger = LoggingService.Instance;
+        if (logger != null)
+        {
+            logger.Info("User logging out - automatically enabling offline mode");
+        }
+        
+        // Set offline mode to true when logging out
+        _settings.OfflineMode = true;
         _settings.Save();
         
+        // Log the completion of logout
+        if (logger != null)
+        {
+            logger.Info("Logout completed - user switched to offline mode, settings auto-saved");
+        }
+        
         // Update UI
-        StatusMessage = "Successfully logged out";
+        StatusMessage = "Successfully logged out and switched to offline mode";
+        this.RaisePropertyChanged(nameof(IsOfflineMode));
         this.RaisePropertyChanged(nameof(IsLoggedIn));
         this.RaisePropertyChanged(nameof(LoginStatusText));
         this.RaisePropertyChanged(nameof(LoggedInInitial));
@@ -3569,9 +3700,15 @@ public partial class MainWindowViewModel : ViewModelBase
             logViewerWindow.Show();
         }
     }
-    
-    private void ShowNotifications()
+      private void ShowNotifications()
     {
+        // Don't show notifications panel in offline mode
+        if (_settings.OfflineMode)
+        {
+            StatusMessage = "Notifications are disabled in offline mode";
+            return;
+        }
+        
         // Show notifications panel
         IsNotificationsVisible = true;
         

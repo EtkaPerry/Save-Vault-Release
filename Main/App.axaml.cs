@@ -184,15 +184,25 @@ public partial class App : Application
             {
                 DataContext = viewModel
             };
-            
-            // Store the window reference for later showing/hiding
+              // Store the window reference for later showing/hiding
             viewModel._mainWindow = mainWindow;
             
-            // Check for updates if enabled
-            _ = viewModel.InitializeUpdateCheck();
+            // Online status is always remembered between sessions
+            logger.Info($"Using saved online/offline status: {(settings.OfflineMode ? "offline" : "online")}");
+            // No need to do anything as the settings already have the offline mode set
             
-            // Check for notifications
-            _ = Services.NotificationService.Instance.CheckForNotificationsIfNeeded();
+            // Check for updates if enabled and not in offline mode
+            if (!settings.OfflineMode)
+            {
+                _ = viewModel.InitializeUpdateCheck();
+                
+                // Check for notifications
+                _ = Services.NotificationService.Instance.CheckForNotificationsIfNeeded();
+            }
+            else
+            {
+                logger.Info("Offline mode active. Skipping update and notification checks.");
+            }
             
             // Show Terms and Conditions if not accepted yet
             if (!settings.TermsAccepted)

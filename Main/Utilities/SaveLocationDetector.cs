@@ -153,8 +153,8 @@ namespace SaveVaultApp.Utilities
                                             ExecutablePath = executablePath,
                                             SavePath = ExpandEnvironmentVariables(knownGame.SavePath)
                                         };
-                                        
-                                        foundGames.Add(gameInfo);
+                                          foundGames.Add(gameInfo);
+                                        // Debug log for known games only - this won't clutter the main logs
                                         Debug.WriteLine($"Found known game: {knownGame.Name} at {executablePath}");
                                     }
                                 }

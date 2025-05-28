@@ -79,9 +79,9 @@ namespace SaveVaultApp.Services
         /// </summary>
         public async Task CheckForUpdatesIfNeeded()
         {
-            if (!_settings.AutoCheckUpdates)
+            if (!_settings.AutoCheckUpdates || _settings.OfflineMode)
             {
-                LoggingService.Instance.Info("Auto-update checks are disabled");
+                LoggingService.Instance.Info("Update checks are disabled (auto-update disabled or offline mode)");
                 return;
             }
 
@@ -100,6 +100,14 @@ namespace SaveVaultApp.Services
             try
             {
                 if (IsChecking) return false;
+                
+                // Don't check for updates in offline mode
+                if (_settings.OfflineMode)
+                {
+                    UpdateStatus("Update checks are disabled in offline mode");
+                    return false;
+                }
+                
                 IsChecking = true;
                 UpdateStatus("Checking for updates...");
                   LoggingService.Instance.Info($"Checking for updates at {_updateUrl}");

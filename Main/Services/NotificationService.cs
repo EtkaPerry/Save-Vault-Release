@@ -122,6 +122,14 @@ namespace SaveVaultApp.Services
                 IsChecking = true;
                 UpdateStatus("Checking for notifications...");
                 
+                // Check if in offline mode or not authenticated
+                if (_settings.OfflineMode)
+                {
+                    UpdateStatus("Offline mode active. Notifications disabled.");
+                    IsChecking = false;
+                    return false;
+                }
+                
                 // Check if user is authenticated
                 if (string.IsNullOrEmpty(_settings.AuthToken))
                 {

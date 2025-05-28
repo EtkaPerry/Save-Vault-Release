@@ -34,10 +34,11 @@
                     <Color x:Key="SecondaryTextColor">#aaaaaa</Color>                    <!-- Add Bitmap resource for dark theme -->                    <Bitmap x:Key="SortIconSource">/Assets/icon/dark/sort.png</Bitmap>
                     <Bitmap x:Key="CloseIconSource">/Assets/icon/dark/close.png</Bitmap>
                     <Bitmap x:Key="AddIconSource">/Assets/icon/dark/add.png</Bitmap>
-                    <Bitmap x:Key="download.png">/Assets/icon/dark/download.png</Bitmap>
-                    <Bitmap x:Key="bell.png">/Assets/icon/dark/bell.png</Bitmap>
+                    <Bitmap x:Key="download.png">/Assets/icon/dark/download.png</Bitmap>                    <Bitmap x:Key="bell.png">/Assets/icon/dark/bell.png</Bitmap>
                     <Bitmap x:Key="setting.png">/Assets/icon/dark/setting.png</Bitmap>
                     <Bitmap x:Key="refresh.png">/Assets/icon/dark/refresh.png</Bitmap>
+                    <Bitmap x:Key="logedout.png">/Assets/icon/dark/logedout.png</Bitmap>
+                    <Bitmap x:Key="logedin.png">/Assets/icon/nat/logedin.png</Bitmap>
                 </ResourceDictionary>
                 
                 <!-- Light Theme Values -->
@@ -56,10 +57,11 @@
                     <Color x:Key="SecondaryTextColor">#666666</Color>                    <!-- Add Bitmap resource for light theme -->                    <Bitmap x:Key="SortIconSource">/Assets/icon/light/sort.png</Bitmap>
                     <Bitmap x:Key="CloseIconSource">/Assets/icon/light/close.png</Bitmap>
                     <Bitmap x:Key="AddIconSource">/Assets/icon/light/add.png</Bitmap>
-                    <Bitmap x:Key="download.png">/Assets/icon/light/download.png</Bitmap>
-                    <Bitmap x:Key="bell.png">/Assets/icon/light/bell.png</Bitmap>
+                    <Bitmap x:Key="download.png">/Assets/icon/light/download.png</Bitmap>                    <Bitmap x:Key="bell.png">/Assets/icon/light/bell.png</Bitmap>
                     <Bitmap x:Key="setting.png">/Assets/icon/light/setting.png</Bitmap>
                     <Bitmap x:Key="refresh.png">/Assets/icon/light/refresh.png</Bitmap>
+                    <Bitmap x:Key="logedout.png">/Assets/icon/light/logedout.png</Bitmap>
+                    <Bitmap x:Key="logedin.png">/Assets/icon/nat/logedin.png</Bitmap>
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>

@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using Microsoft.Win32;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Runtime.Versioning;
 using System.Timers;
@@ -28,14 +29,12 @@ public partial class MainWindowViewModel : ViewModelBase
     public AppData AppData => _appData; // This now serves the purpose of the former AppData
     
     public ObservableCollection<ApplicationInfo> InstalledApps { get; } = new();
-    public ObservableCollection<ApplicationInfo> HiddenGames { get; } = new();
-
-    // Add backup timer
-    private readonly Timer _backupTimer;
+    public ObservableCollection<ApplicationInfo> HiddenGames { get; } = new();    // Add backup timer
+    private readonly System.Timers.Timer _backupTimer;
     private readonly string _backupRootFolder;
     
     // Add timer for UI updates
-    private readonly Timer _uiRefreshTimer;
+    private readonly System.Timers.Timer _uiRefreshTimer;
     
     private bool _isHiddenGamesExpanded;
     public bool IsHiddenGamesExpanded
@@ -100,7 +99,10 @@ public partial class MainWindowViewModel : ViewModelBase
         }
     }
     
-    private readonly Timer _processCheckTimer;
+    private readonly System.Timers.Timer _processCheckTimer;
+    
+    // Cancellation token for scanning operations
+    private CancellationTokenSource? _scanCancellationTokenSource;
       private string _nextSaveText = string.Empty;
     public string NextSaveText
     {
@@ -271,6 +273,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 SelectedApp = null;
                 StatusMessage = "Notifications are disabled in offline mode. Returned to home screen.";
             }
+            // Note: Save Carrier works offline, so we don't need to hide it when going offline
         };
         
         notificationService.NotificationsUpdated += (s, notifications) => {
@@ -305,14 +308,13 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             Directory.CreateDirectory(_backupRootFolder);
         }
-        
-        // Initialize process check timer with shorter interval
-        _processCheckTimer = new Timer(3000); // Check every 3 seconds
+          // Initialize process check timer with shorter interval
+        _processCheckTimer = new System.Timers.Timer(3000); // Check every 3 seconds
         _processCheckTimer.Elapsed += OnProcessCheckTimerElapsed;
         _processCheckTimer.AutoReset = true;
         
         // Initialize backup timer - check every second
-        _backupTimer = new Timer(1000); // Check every sec
+        _backupTimer = new System.Timers.Timer(1000); // Check every sec
         _backupTimer.Elapsed += OnBackupTimerElapsed;
         _backupTimer.AutoReset = true;
         // Always start the backup timer regardless of global settings
@@ -321,7 +323,7 @@ public partial class MainWindowViewModel : ViewModelBase
         Debug.WriteLine("Auto-save timer started with interval: " + _settings.AutoSaveInterval + " minutes");
         
         // Initialize UI refresh timer - update every second
-        _uiRefreshTimer = new Timer(1000); // Exactly 1 second
+        _uiRefreshTimer = new System.Timers.Timer(1000); // Exactly 1 second
         _uiRefreshTimer.Elapsed += OnUIRefreshTimerElapsed;
         _uiRefreshTimer.AutoReset = true;
         _uiRefreshTimer.Start(); // Start this timer immediately
@@ -1044,10 +1046,13 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         }
         ApplySort();
-    }
-
-    private async Task LoadInstalledAppsAsync()
+    }    private async Task LoadInstalledAppsAsync()
     {
+        // Cancel any existing scan
+        _scanCancellationTokenSource?.Cancel();
+        _scanCancellationTokenSource = new CancellationTokenSource();
+        var cancellationToken = _scanCancellationTokenSource.Token;
+
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
             InstalledApps.Clear();
@@ -1066,8 +1071,20 @@ public partial class MainWindowViewModel : ViewModelBase
                 try
                 {
                     Services.LoggingService.Instance.Info("Starting enhanced application discovery scan...");
-                    // Create a temporary collection that will trigger our callback
+                    
+                    // Create progress reporter to update UI
+                    var progress = new Progress<string>(message =>
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        {
+                            StatusMessage = message;
+                        });
+                    });
+
+                    // Create a temporary collection for discovered apps
                     var tempApps = new ObservableCollection<ApplicationInfo>();
+                    
+                    // Set up event handler to add discovered apps to UI
                     tempApps.CollectionChanged += (sender, e) =>
                     {
                         if (e.NewItems != null)
@@ -1076,6 +1093,9 @@ public partial class MainWindowViewModel : ViewModelBase
                             {
                                 Avalonia.Threading.Dispatcher.UIThread.Post(() =>
                                 {
+                                    if (cancellationToken.IsCancellationRequested)
+                                        return;
+                                        
                                     AllInstalledApps.Add(app);
                                     if (app.IsHidden)
                                         HiddenGames.Add(app);
@@ -1097,37 +1117,60 @@ public partial class MainWindowViewModel : ViewModelBase
                         }
                     };
 
-                    // Start the scan with our observable collection
-                    Helpers.ApplicationScanner.FindInstalledApplications(tempApps, _settings);
+                    // Start the async scan
+                    await Helpers.ApplicationScanner.FindInstalledApplicationsAsync(tempApps, _settings, progress, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    Services.LoggingService.Instance.Info("Application scan was cancelled");
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        StatusMessage = "Application scan cancelled";
+                        IsLoading = false;
+                    });
+                    return;
                 }
                 catch (Exception ex)
                 {
                     Services.LoggingService.Instance.Error($"Error in enhanced application scan: {ex.Message}");
                     // Fall back to original method if the enhanced one fails
-                    var tempApps = new ObservableCollection<ApplicationInfo>();
-                    tempApps.CollectionChanged += (sender, e) =>
+                    try
                     {
-                        if (e.NewItems != null)
+                        var tempApps = new ObservableCollection<ApplicationInfo>();
+                        tempApps.CollectionChanged += (sender, e) =>
                         {
-                            foreach (ApplicationInfo app in e.NewItems)
+                            if (e.NewItems != null)
                             {
-                                Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                                foreach (ApplicationInfo app in e.NewItems)
                                 {
-                                    AllInstalledApps.Add(app);
-                                    if (app.IsHidden)
-                                        HiddenGames.Add(app);
-                                    else
-                                        InstalledApps.Add(app);
-                                });
+                                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                                    {
+                                        if (cancellationToken.IsCancellationRequested)
+                                            return;
+                                            
+                                        AllInstalledApps.Add(app);
+                                        if (app.IsHidden)
+                                            HiddenGames.Add(app);
+                                        else
+                                            InstalledApps.Add(app);
+                                    });
+                                }
                             }
-                        }
-                    };
-                    SearchForExecutables(tempApps);
+                        };
+                        SearchForExecutables(tempApps);
+                    }
+                    catch (Exception fallbackEx)
+                    {
+                        Services.LoggingService.Instance.Error($"Fallback scan also failed: {fallbackEx.Message}");
+                    }
                 }
             }
 
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
+                if (cancellationToken.IsCancellationRequested)
+                    return;
+                    
                 IsLoading = false;
                   // Count final stats
                 int totalPrograms = AllInstalledApps.Count;
@@ -3163,6 +3206,12 @@ public partial class MainWindowViewModel : ViewModelBase
         {
             IsNotificationsVisible = false;
         }
+
+        // Hide Save Carrier panel if it's visible
+        if (IsSaveCarrierVisible)
+        {
+            IsSaveCarrierVisible = false;
+        }
         
         StatusMessage = "Home";
     }
@@ -3675,6 +3724,9 @@ public partial class MainWindowViewModel : ViewModelBase
     
     public IRelayCommand OpenSaveCarrierCommand => OpenSaveCarrierCommandImpl ??= new RelayCommand(OpenSaveCarrier);
     private IRelayCommand? OpenSaveCarrierCommandImpl;
+
+    public IRelayCommand ShowSaveCarrierCommand => ShowSaveCarrierCommandImpl ??= new RelayCommand(ShowSaveCarrier);
+    private IRelayCommand? ShowSaveCarrierCommandImpl;
     
     public IRelayCommand ShowNotificationsCommand => ShowNotificationsCommandImpl ??= new RelayCommand(ShowNotifications);
     private IRelayCommand? ShowNotificationsCommandImpl;
@@ -3717,6 +3769,41 @@ public partial class MainWindowViewModel : ViewModelBase
         
         // Set status message
         StatusMessage = "Notifications";
+    }
+
+    private void ShowSaveCarrier()
+    {
+        // Process all applications to ensure save paths are detected
+        var allAppsWithSavePaths = new List<ApplicationInfo>();
+        
+        foreach (var app in AllInstalledApps)
+        {
+            // Try to detect save path if it's missing or unknown
+            if (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown")
+            {
+                string detectedPath = DetectSavePath(app);
+                if (!string.IsNullOrEmpty(detectedPath) && detectedPath != "Unknown")
+                {
+                    app.SavePath = detectedPath;
+                }
+            }
+            
+            // Add all apps (they'll be filtered in SaveCarrierViewModel)
+            allAppsWithSavePaths.Add(app);
+        }
+
+        // Initialize the Save Carrier view model
+        SaveCarrierViewModel = new SaveCarrierViewModel(_settings, allAppsWithSavePaths);
+        
+        // Show Save Carrier panel
+        IsSaveCarrierVisible = true;
+        
+        // Hide the "Select an application" message and notifications
+        SelectedApp = null;
+        IsNotificationsVisible = false;
+        
+        // Set status message
+        StatusMessage = "Save Carrier";
     }
     
     private void MarkAllNotificationsAsRead()
@@ -3848,6 +3935,20 @@ public partial class MainWindowViewModel : ViewModelBase
     {
         get => _isNotificationsVisible;
         set => this.RaiseAndSetIfChanged(ref _isNotificationsVisible, value);
+    }
+
+    private bool _isSaveCarrierVisible;
+    public bool IsSaveCarrierVisible
+    {
+        get => _isSaveCarrierVisible;
+        set => this.RaiseAndSetIfChanged(ref _isSaveCarrierVisible, value);
+    }
+
+    private SaveCarrierViewModel? _saveCarrierViewModel;
+    public SaveCarrierViewModel? SaveCarrierViewModel
+    {
+        get => _saveCarrierViewModel;
+        set => this.RaiseAndSetIfChanged(ref _saveCarrierViewModel, value);
     }
     
     // Update commands
@@ -4369,13 +4470,20 @@ public partial class MainWindowViewModel : ViewModelBase
         // Save settings to persist the changes to backup paths
         _settings.Save();
     }
-    
-    // Toggle sidebar visibility command
+      // Toggle sidebar visibility command
     [RelayCommand]
     private void ToggleSidebar()
     {
         IsSidebarVisible = !IsSidebarVisible;
         LoggingService.Instance.Info($"Sidebar visibility toggled to {IsSidebarVisible}");
+    }
+    
+    // Cleanup method to dispose of resources
+    public void Cleanup()
+    {
+        _scanCancellationTokenSource?.Cancel();
+        _scanCancellationTokenSource?.Dispose();
+        _scanCancellationTokenSource = null;
     }
 }
  

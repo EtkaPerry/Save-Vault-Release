@@ -63,8 +63,7 @@
                 Background="{DynamicResource SidebarBackground}"
                 BoxShadow="0 1 4 0 #20000000">
                 
-          <Grid RowDefinitions="Auto,Auto,*" Margin="16">
-            <!-- Section Title -->
+          <Grid RowDefinitions="Auto,Auto,*" Margin="16">            <!-- Section Title -->
             <TextBlock Grid.Row="0" 
                       Text="Select games to include" 
                       FontSize="16" 
@@ -78,26 +77,32 @@
                    CornerRadius="6" 
                    Padding="8" 
                    Margin="0,0,0,12">
-              <WrapPanel Orientation="Horizontal">
-                <Button Content="Select All" 
-                        Command="{Binding SelectAllCommand}" 
-                        Theme="{StaticResource ModernButtonStyle}"
-                        Margin="0,0,8,0"/>
-                        
-                <Button Content="Deselect All" 
-                        Command="{Binding DeselectAllCommand}" 
-                        Theme="{StaticResource ModernButtonStyle}"
-                        Margin="0,0,8,0"/>
-                        
-                <Button Content="Invert Selection" 
-                        Command="{Binding InvertSelectionCommand}" 
-                        Theme="{StaticResource ModernButtonStyle}"
-                        Margin="0,0,8,0"/>
-                        
-                <Button Content="Only Known Programs" 
-                        Command="{Binding SelectOnlyKnownGamesCommand}" 
-                        Theme="{StaticResource ModernButtonStyle}"/>
-              </WrapPanel>
+              <StackPanel>                <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
+                  <Button Content="Select All" 
+                          Command="{Binding SelectAllCommand}" 
+                          Theme="{StaticResource ModernButtonStyle}"
+                          Margin="0,0,8,0"/>
+                          
+                  <Button Content="Only Select Known Games" 
+                          Command="{Binding SelectOnlyKnownGamesCommand}" 
+                          Theme="{StaticResource ModernButtonStyle}"
+                          Margin="0,0,8,0"/>
+                          
+                  <Button Content="Deselect All" 
+                          Command="{Binding DeselectAllCommand}" 
+                          Theme="{StaticResource ModernButtonStyle}"
+                          Margin="0,0,8,0"/>
+                          
+                  <Button Content="Invert Selection" 
+                          Command="{Binding InvertSelectionCommand}" 
+                          Theme="{StaticResource ModernButtonStyle}"/>
+                </WrapPanel>
+                
+                <CheckBox IsChecked="{Binding ShowOnlyKnownGames}" 
+                          Content="Show only Known Games" 
+                          Foreground="{DynamicResource TextColor}"
+                          Margin="4,0,0,0"/>
+              </StackPanel>
             </Border>
             
             <!-- Games List with improved styling -->

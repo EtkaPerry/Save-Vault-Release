@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.Versioning;
+using System.Threading;
 using System.Threading.Tasks;
 using SaveVaultApp.Services;
 using SaveVaultApp.Utilities;
@@ -15,250 +16,306 @@ namespace SaveVaultApp.Helpers
 {
     [SupportedOSPlatform("windows")]
     public static class ApplicationScanner
-    {
-        /// <summary>
+    {        /// <summary>
         /// Enhanced method to find installed applications by combining filesystem and registry scanning
         /// </summary>
-        public static void FindInstalledApplications(ObservableCollection<ApplicationInfo> installedApps, Settings settings)
-        {
-            var processedExecutables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            
-            // Helper function to add an app safely on the UI thread
-            void AddAppSafely(ApplicationInfo app)
+        public static async Task FindInstalledApplicationsAsync(ObservableCollection<ApplicationInfo> installedApps, Settings settings, 
+            IProgress<string>? progress = null, CancellationToken cancellationToken = default)        {
+            await Task.Run(async () =>
             {
-                if (!installedApps.Any(a => string.Equals(a.ExecutablePath, app.ExecutablePath, StringComparison.OrdinalIgnoreCase)))
-                {
-                    Avalonia.Threading.Dispatcher.UIThread.Post(() => installedApps.Add(app));
-                }
-            }
-            
-            // Initialize search paths
-            var searchPaths = new List<string>();
-            LoggingService.Instance.Info("Starting enhanced application discovery scan...");
-              // Scan for known games first
-            try
-            {
-                // Scanning known games without logging the scan process to reduce log noise
-                var knownGames = SaveLocationDetector.ScanForKnownGames(settings, processedExecutables);
-                foreach (var game in knownGames)
-                {
-                    AddAppSafely(game);
-                }
-                // Log only the count of known games found (still useful information)
-                LoggingService.Instance.Info($"Found {knownGames.Count} known games based on folder patterns");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error during known game scan: {ex.Message}");
-                LoggingService.Instance.Error($"Error during known game scan: {ex.Message}");
-            }
-            
-            // Then scan the Windows Registry for installed applications
-            try
-            {
-                LoggingService.Instance.Info("Scanning Windows Registry for installed applications...");
-                var registryExecutables = RegistryScanner.ScanRegistryForApplications();
+                var processedExecutables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 
-                foreach (var exePath in registryExecutables)
+                // Helper function to add an app safely on the UI thread
+                void AddAppSafely(ApplicationInfo app)
                 {
-                    if (!processedExecutables.Contains(exePath) && File.Exists(exePath))
+                    if (!installedApps.Any(a => string.Equals(a.ExecutablePath, app.ExecutablePath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(() => installedApps.Add(app));
+                    }
+                }
+                
+                // Initialize search paths
+                var searchPaths = new List<string>();
+                LoggingService.Instance.Info("Starting enhanced application discovery scan...");
+                
+                progress?.Report("Scanning for known games...");
+                
+                // Scan for known games first
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    var knownGames = SaveLocationDetector.ScanForKnownGames(settings, processedExecutables);
+                    foreach (var game in knownGames)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        AddAppSafely(game);
+                    }
+                    LoggingService.Instance.Info($"Found {knownGames.Count} known games based on folder patterns");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error during known game scan: {ex.Message}");
+                    LoggingService.Instance.Error($"Error during known game scan: {ex.Message}");
+                }
+                
+                progress?.Report("Scanning Windows Registry...");
+                
+                // Then scan the Windows Registry for installed applications
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    LoggingService.Instance.Info("Scanning Windows Registry for installed applications...");
+                    var registryExecutables = await Task.Run(() => RegistryScanner.ScanRegistryForApplications(), cancellationToken);
+                    
+                    int processedCount = 0;
+                    foreach (var exePath in registryExecutables)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        
+                        if (!processedExecutables.Contains(exePath) && File.Exists(exePath))
+                        {
+                            try
+                            {
+                                var fileInfo = new FileInfo(exePath);
+                                if (!ShouldSkipExecutable(fileInfo))
+                                {
+                                    processedExecutables.Add(exePath);
+                                    string appName = Path.GetFileNameWithoutExtension(exePath);
+                                    
+                                    var app = new ApplicationInfo(settings)
+                                    {
+                                        Name = appName,
+                                        Path = Path.GetDirectoryName(exePath) ?? string.Empty,
+                                        ExecutablePath = exePath
+                                    };
+                                    
+                                    AddAppSafely(app);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine($"Error processing registry executable {exePath}: {ex.Message}");
+                            }
+                        }
+                        
+                        processedCount++;
+                        if (processedCount % 50 == 0)
+                        {
+                            progress?.Report($"Processing registry entries... ({processedCount}/{registryExecutables.Count})");
+                            await Task.Delay(1, cancellationToken); // Yield control
+                        }
+                    }
+                    
+                    LoggingService.Instance.Info($"Registry scan found {registryExecutables.Count} total executables");
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Error during registry scan: {ex.Message}");
+                    LoggingService.Instance.Error($"Error during registry scan: {ex.Message}");
+                }
+                
+                progress?.Report("Scanning file system...");
+                
+                // Build a list of search paths - start with checking all drives
+                try
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    // Check each drive for common game installation paths
+                    foreach (DriveInfo drive in DriveInfo.GetDrives())
                     {
                         try
                         {
-                            var fileInfo = new FileInfo(exePath);
-                            if (!ShouldSkipExecutable(fileInfo))
+                            cancellationToken.ThrowIfCancellationRequested();
+                            
+                            if (!drive.IsReady || drive.DriveType == DriveType.Network || drive.DriveType == DriveType.NoRootDirectory)
+                                continue;
+
+                            string driveLetter = drive.Name;
+                            progress?.Report($"Scanning drive {driveLetter}...");
+                            
+                            // Common installation directories on this drive
+                            var commonPaths = new[]
                             {
-                                processedExecutables.Add(exePath);
-                                string appName = Path.GetFileNameWithoutExtension(exePath);
+                                "Program Files",
+                                "Program Files (x86)",
+                                "Games",
+                                "SteamLibrary",
+                                "Steam",
+                                "SteamApps",
+                                "Epic Games",
+                                "GoG Games",
+                                "Origin Games",
+                                "Ubisoft Games",
+                                "Xbox Games"
+                            };
+                            
+                            foreach (var path in commonPaths)
+                            {
+                                cancellationToken.ThrowIfCancellationRequested();
                                 
-                                var app = new ApplicationInfo(settings)
+                                string fullPath = Path.Combine(driveLetter, path);
+                                if (Directory.Exists(fullPath))
+                                    searchPaths.Add(fullPath);
+                            }
+                            
+                            // Check for the Users folder on this drive
+                            string usersFolder = Path.Combine(driveLetter, "Users");
+                            if (Directory.Exists(usersFolder))
+                            {
+                                foreach (var userDir in Directory.GetDirectories(usersFolder))
                                 {
-                                    Name = appName,
-                                    Path = Path.GetDirectoryName(exePath) ?? string.Empty,
-                                    ExecutablePath = exePath
-                                };
-                                
-                                AddAppSafely(app);
+                                    try
+                                    {
+                                        cancellationToken.ThrowIfCancellationRequested();
+                                        
+                                        // Add common user game folders
+                                        var userGameFolders = new[]
+                                        {
+                                            Path.Combine(userDir, "Documents", "My Games"),
+                                            Path.Combine(userDir, "Saved Games"),
+                                            Path.Combine(userDir, "Games"),
+                                            Path.Combine(userDir, "Downloads"),
+                                            Path.Combine(userDir, "Desktop")
+                                        };
+                                        
+                                        foreach (var gameFolder in userGameFolders)
+                                        {
+                                            cancellationToken.ThrowIfCancellationRequested();
+                                            if (Directory.Exists(gameFolder))
+                                                searchPaths.Add(gameFolder);
+                                        }
+                                    }
+                                    catch (UnauthorizedAccessException)
+                                    {
+                                        // Skip if we don't have access to this user's directory
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Debug.WriteLine($"Error accessing user folder {userDir}: {ex.Message}");
+                                    }
+                                }
                             }
                         }
                         catch (Exception ex)
                         {
-                            Debug.WriteLine($"Error processing registry executable {exePath}: {ex.Message}");
+                            Debug.WriteLine($"Error accessing drive {drive.Name}: {ex.Message}");
                         }
                     }
                 }
-                
-                LoggingService.Instance.Info($"Registry scan found {registryExecutables.Count} total executables");
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error during registry scan: {ex.Message}");
-                LoggingService.Instance.Error($"Error during registry scan: {ex.Message}");
-            }
-            
-            // Build a list of search paths - start with checking all drives
-            try
-            {
-                // Check each drive for common game installation paths
-                foreach (DriveInfo drive in DriveInfo.GetDrives())
+                catch (OperationCanceledException)
                 {
-                    try
-                    {
-                        if (!drive.IsReady || drive.DriveType == DriveType.Network || drive.DriveType == DriveType.NoRootDirectory)
-                            continue;
-
-                        string driveLetter = drive.Name;
-                        
-                        // Common installation directories on this drive
-                        var commonPaths = new[]
-                        {
-                            "Program Files",
-                            "Program Files (x86)",
-                            "Games",
-                            "SteamLibrary",
-                            "Steam",
-                            "SteamApps",
-                            "Epic Games",
-                            "GoG Games",
-                            "Origin Games",
-                            "Ubisoft Games",
-                            "Xbox Games"
-                        };
-                        
-                        foreach (var path in commonPaths)
-                        {
-                            string fullPath = Path.Combine(driveLetter, path);
-                            if (Directory.Exists(fullPath))
-                                searchPaths.Add(fullPath);
-                        }
-                        
-                        // Check for the Users folder on this drive
-                        string usersFolder = Path.Combine(driveLetter, "Users");
-                        if (Directory.Exists(usersFolder))
-                        {
-                            foreach (var userDir in Directory.GetDirectories(usersFolder))
-                            {
-                                try
-                                {
-                                    // Add common user game folders
-                                    var userGameFolders = new[]
-                                    {
-                                        Path.Combine(userDir, "Documents", "My Games"),
-                                        Path.Combine(userDir, "Saved Games"),
-                                        Path.Combine(userDir, "Games"),
-                                        Path.Combine(userDir, "Downloads"),
-                                        Path.Combine(userDir, "Desktop")
-                                    };
-                                    
-                                    foreach (var gameFolder in userGameFolders)
-                                    {
-                                        if (Directory.Exists(gameFolder))
-                                            searchPaths.Add(gameFolder);
-                                    }
-                                }
-                                catch (UnauthorizedAccessException)
-                                {
-                                    // Skip if we don't have access to this user's directory
-                                }
-                                catch (Exception ex)
-                                {
-                                    Debug.WriteLine($"Error accessing user folder {userDir}: {ex.Message}");
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"Error accessing drive {drive.Name}: {ex.Message}");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error enumerating drives: {ex.Message}");
-                LoggingService.Instance.Error($"Error enumerating drives: {ex.Message}");
-            }
-            
-            // Add standard Windows shell folders
-            var systemPaths = new[]
-            {
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles),
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFilesX86),
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "My Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Saved Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps")
-            };
-            searchPaths.AddRange(systemPaths.Where(Directory.Exists));
-            
-            // Add common game launcher paths
-            var launcherPaths = new[]
-            {
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Steam"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Epic Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Epic Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "GOG Galaxy"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "GOG Galaxy"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Origin"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Origin"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "EA Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "EA Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Ubisoft"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Ubisoft"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Rockstar Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Rockstar Games"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Bethesda.net Launcher"),
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Bethesda.net Launcher"),
-                @"C:\SteamLibrary",
-                @"D:\SteamLibrary",
-                @"E:\SteamLibrary",
-                @"F:\SteamLibrary",
-                @"C:\Games",
-                @"D:\Games",
-                @"E:\Games",
-                @"F:\Games"
-            };
-            searchPaths.AddRange(launcherPaths.Where(Directory.Exists));
-            
-            LoggingService.Instance.Info($"Searching {searchPaths.Count} paths for applications...");
-                
-            // Process each search path
-            foreach (var searchPath in searchPaths.Distinct())
-            {
-                if (!Directory.Exists(searchPath))
-                    continue;
-                
-                try
-                {
-                    SearchDirectoryForExecutables(searchPath, installedApps, processedExecutables, settings, addAppCallback: AddAppSafely);
+                    throw;
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"Error searching path {searchPath}: {ex.Message}");
+                    Debug.WriteLine($"Error enumerating drives: {ex.Message}");
+                    LoggingService.Instance.Error($"Error enumerating drives: {ex.Message}");
                 }
-            }
-            
-            LoggingService.Instance.Info($"Enhanced scan completed. Found {processedExecutables.Count} unique executables.");
+                
+                // Add standard Windows shell folders
+                var systemPaths = new[]
+                {
+                    Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                    Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles),
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFilesX86),
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonDocuments),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Documents", "My Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Saved Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WindowsApps")
+                };
+                searchPaths.AddRange(systemPaths.Where(Directory.Exists));
+                
+                // Add common game launcher paths
+                var launcherPaths = new[]
+                {
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Steam"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Epic Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Epic Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "GOG Galaxy"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "GOG Galaxy"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Origin"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Origin"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "EA Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "EA Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Ubisoft"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Ubisoft"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Rockstar Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Rockstar Games"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Bethesda.net Launcher"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Bethesda.net Launcher"),
+                    @"C:\SteamLibrary",
+                    @"D:\SteamLibrary",
+                    @"E:\SteamLibrary",
+                    @"F:\SteamLibrary",
+                    @"C:\Games",
+                    @"D:\Games",
+                    @"E:\Games",
+                    @"F:\Games"
+                };
+                searchPaths.AddRange(launcherPaths.Where(Directory.Exists));
+                
+                LoggingService.Instance.Info($"Searching {searchPaths.Count} paths for applications...");
+                    
+                // Process each search path
+                int pathIndex = 0;
+                foreach (var searchPath in searchPaths.Distinct())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    if (!Directory.Exists(searchPath))
+                        continue;
+                    
+                    pathIndex++;
+                    progress?.Report($"Scanning {Path.GetFileName(searchPath)}... ({pathIndex}/{searchPaths.Count})");
+                    
+                    try
+                    {
+                        await SearchDirectoryForExecutablesAsync(searchPath, installedApps, processedExecutables, settings, 
+                            progress, cancellationToken, addAppCallback: AddAppSafely);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Error searching path {searchPath}: {ex.Message}");
+                    }
+                }
+                
+                LoggingService.Instance.Info($"Enhanced scan completed. Found {processedExecutables.Count} unique executables.");
+            }, cancellationToken);
         }
-        
-        private static void SearchDirectoryForExecutables(string directory, ObservableCollection<ApplicationInfo> apps, 
-            HashSet<string> processedExecutables, Settings settings, int maxDepth = 6, int currentDepth = 0, Action<ApplicationInfo>? addAppCallback = null)
-        {
+          private static async Task SearchDirectoryForExecutablesAsync(string directory, ObservableCollection<ApplicationInfo> apps, 
+            HashSet<string> processedExecutables, Settings settings, IProgress<string>? progress = null, 
+            CancellationToken cancellationToken = default, int maxDepth = 6, int currentDepth = 0, Action<ApplicationInfo>? addAppCallback = null)        {
             if (currentDepth > maxDepth)
                 return;
                 
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                
                 if (ShouldSkipDirectory(directory))
                     return;
 
@@ -270,17 +327,22 @@ namespace SaveVaultApp.Helpers
 
                 foreach (var binFolder in binFolders)
                 {
-                    ProcessExecutablesInDirectory(binFolder, apps, processedExecutables, settings, addAppCallback);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await ProcessExecutablesInDirectoryAsync(binFolder, apps, processedExecutables, settings, cancellationToken, addAppCallback);
                 }
 
                 // Then process current directory
-                ProcessExecutablesInDirectory(directory, apps, processedExecutables, settings, addAppCallback);
+                await ProcessExecutablesInDirectoryAsync(directory, apps, processedExecutables, settings, cancellationToken, addAppCallback);
                 
                 // Recursively search subdirectories
-                foreach (var subDir in Directory.GetDirectories(directory))
+                var subdirectories = Directory.GetDirectories(directory);
+                for (int i = 0; i < subdirectories.Length; i++)
                 {
                     try
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        
+                        var subDir = subdirectories[i];
                         var dirInfo = new DirectoryInfo(subDir);
                         
                         // Skip hidden and system folders
@@ -290,7 +352,24 @@ namespace SaveVaultApp.Helpers
                             continue;
                         }
                         
-                        SearchDirectoryForExecutables(subDir, apps, processedExecutables, settings, maxDepth, currentDepth + 1, addAppCallback);
+                        // Update progress periodically
+                        if (currentDepth == 0 && i % 10 == 0)
+                        {
+                            progress?.Report($"Scanning {Path.GetFileName(directory)}... ({i + 1}/{subdirectories.Length} folders)");
+                        }
+                        
+                        await SearchDirectoryForExecutablesAsync(subDir, apps, processedExecutables, settings, progress, 
+                            cancellationToken, maxDepth, currentDepth + 1, addAppCallback);
+                        
+                        // Yield control occasionally
+                        if (i % 5 == 0)
+                        {
+                            await Task.Delay(1, cancellationToken);
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
                     }
                     catch (UnauthorizedAccessException)
                     {
@@ -298,19 +377,21 @@ namespace SaveVaultApp.Helpers
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"Error accessing directory {subDir}: {ex.Message}");
+                        Debug.WriteLine($"Error accessing directory {subdirectories[i]}: {ex.Message}");
                     }
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"Error searching directory {directory}: {ex.Message}");
             }
         }
-        
-        private static void ProcessExecutablesInDirectory(string directory, ObservableCollection<ApplicationInfo> apps, 
-            HashSet<string> processedExecutables, Settings settings, Action<ApplicationInfo>? addAppCallback = null)
-        {
+          private static async Task ProcessExecutablesInDirectoryAsync(string directory, ObservableCollection<ApplicationInfo> apps, 
+            HashSet<string> processedExecutables, Settings settings, CancellationToken cancellationToken, Action<ApplicationInfo>? addAppCallback = null)        {
             // Track executables by their filename (without path) to avoid multiple entries for the same program
             var executableNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             
@@ -324,13 +405,17 @@ namespace SaveVaultApp.Helpers
                 }
             }
             
-            foreach (var exePath in Directory.GetFiles(directory, "*.exe"))
+            var files = Directory.GetFiles(directory, "*.exe");
+            for (int i = 0; i < files.Length; i++)
             {
-                if (processedExecutables.Contains(exePath))
-                    continue;
-                    
                 try
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    
+                    var exePath = files[i];
+                    if (processedExecutables.Contains(exePath))
+                        continue;
+                        
                     var fileInfo = new FileInfo(exePath);
                     
                     if (ShouldSkipExecutable(fileInfo))
@@ -366,10 +451,20 @@ namespace SaveVaultApp.Helpers
                     {
                         apps.Add(app);
                     }
+                    
+                    // Yield control occasionally during large file processing
+                    if (i % 20 == 0)
+                    {
+                        await Task.Delay(1, cancellationToken);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"Error processing executable {exePath}: {ex.Message}");
+                    Debug.WriteLine($"Error processing executable {files[i]}: {ex.Message}");
                 }
             }
         }

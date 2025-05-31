@@ -59,8 +59,7 @@ namespace SaveVaultApp.ViewModels
             get => _statusMessage;
             set => this.RaiseAndSetIfChanged(ref _statusMessage, value);
         }
-        
-        // Processing indicator
+          // Processing indicator
         private bool _isProcessing;
         public bool IsProcessing
         {
@@ -68,16 +67,48 @@ namespace SaveVaultApp.ViewModels
             set => this.RaiseAndSetIfChanged(ref _isProcessing, value);
         }
         
+        // Show only known games flag
+        private bool _showOnlyKnownGames = true; // Default to true
+        public bool ShowOnlyKnownGames
+        {
+            get => _showOnlyKnownGames;
+            set
+            {
+                this.RaiseAndSetIfChanged(ref _showOnlyKnownGames, value);
+                // Refresh the game list when this property changes
+                RefreshGameList();
+            }
+        }
+        
+        // Full list of applications (stored for filtering)
+        private List<ApplicationInfo> _allApplications = new();
+        
         // Constructor
         public SaveCarrierViewModel(Settings settings, List<ApplicationInfo> applications)
         {
             _settings = settings;
+            _allApplications = applications;
             
             // Initialize game list
             PopulateGames(applications);
         }
         
-        // Populate the game list from installed applications
+        // Refresh the game list based on current filter settings
+        private void RefreshGameList()
+        {
+            // If showing only known games, filter the applications list
+            var filteredApps = _showOnlyKnownGames
+                ? _allApplications.Where(app => !string.IsNullOrEmpty(app.KnownGameId)).ToList()
+                : _allApplications;
+                
+            PopulateGames(filteredApps);
+            
+            // Update status message
+            StatusMessage = _showOnlyKnownGames
+                ? "Showing only known games from database"
+                : "Showing all games with save locations";
+        }
+          // Populate the game list from installed applications
         private void PopulateGames(List<ApplicationInfo> applications)
         {
             Games.Clear();
@@ -93,7 +124,8 @@ namespace SaveVaultApp.ViewModels
                     var gameItem = new GameSelectionItem
                     {
                         ApplicationInfo = app,
-                        IsSelected = true // Default select all games since they all have valid save paths
+                        // By default, only select known games
+                        IsSelected = !string.IsNullOrEmpty(app.KnownGameId)
                     };
                     
                     Games.Add(gameItem);
@@ -177,8 +209,7 @@ namespace SaveVaultApp.ViewModels
             }
             StatusMessage = "Inverted game selection";
         }
-        
-        // Command to select only known games
+          // Command to select only known games
         [RelayCommand]
         private void SelectOnlyKnownGames()
         {
@@ -186,6 +217,9 @@ namespace SaveVaultApp.ViewModels
             {
                 game.IsSelected = game.IsKnownGame;
             }
+            
+            // We're selecting known games but not necessarily filtering the list
+            // This allows users to still see all games but only have known ones selected
             StatusMessage = "Selected only games from KnownGames database";
         }
         

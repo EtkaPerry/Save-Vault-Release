@@ -173,6 +173,14 @@ public partial class MainWindowViewModel : ViewModelBase
     // Property to check if we're in offline mode
     public bool IsOfflineMode => _settings.OfflineMode;
 
+    // Method to refresh properties related to offline status
+    public void RefreshOfflineStatus()
+    {
+        this.RaisePropertyChanged(nameof(IsOfflineMode));
+        this.RaisePropertyChanged(nameof(IsLoggedIn));
+        this.RaisePropertyChanged(nameof(LoginStatusText));
+    }
+
     // Changed to internal to allow access from App.axaml.cs
     internal Window? _mainWindow; 
     public bool IsExiting { get; set; }
@@ -2891,7 +2899,7 @@ public partial class MainWindowViewModel : ViewModelBase
     private void SaveNow()
     {
         if (SelectedApp != null && !string.IsNullOrEmpty(SelectedApp.SavePath) && 
-            SelectedApp.SavePath != "Unknown" && Directory.Exists( SelectedApp.SavePath))
+            SelectedApp.SavePath != "Unknown" && Directory.Exists(SelectedApp.SavePath))
         {
             // Generate backup folder path (app-specific)
             string appBackupFolder = Path.Combine(_backupRootFolder, SanitizePathName(SelectedApp.Name));
@@ -3150,8 +3158,7 @@ public partial class MainWindowViewModel : ViewModelBase
         // Otherwise show the login popup
         IsLoginPopupOpen = true;
     }
-    
-    [RelayCommand]
+      [RelayCommand]
     private void ToggleOfflineMode()
     {
         var wasOffline = _settings.OfflineMode;
@@ -3165,7 +3172,12 @@ public partial class MainWindowViewModel : ViewModelBase
         
         // Toggle the offline mode setting
         _settings.OfflineMode = !_settings.OfflineMode;
-        _settings.Save();
+        
+        // This is an explicit user choice, so save it immediately to make sure it persists
+        _settings.ForceSave();
+        
+        // Store that user has manually set online/offline preference
+        Environment.SetEnvironmentVariable("SAVEVAULT_USER_PREFERENCE_SET", "true");
         
         // Log after the change
         if (logger != null)

@@ -102,13 +102,10 @@ namespace SaveVaultApp.Helpers
                             {
                                 Debug.WriteLine($"Error processing registry executable {exePath}: {ex.Message}");
                             }
-                        }
-                        
-                        processedCount++;
-                        if (processedCount % 50 == 0)
+                        }                        processedCount++;
+                        if (processedCount % 100 == 0)
                         {
                             progress?.Report($"Processing registry entries... ({processedCount}/{registryExecutables.Count})");
-                            await Task.Delay(1, cancellationToken); // Yield control
                         }
                     }
                     
@@ -323,16 +320,14 @@ namespace SaveVaultApp.Helpers
                 var binFolders = Directory.GetDirectories(directory)
                     .Where(d => Path.GetFileName(d).ToLowerInvariant().Contains("bin") ||
                                Path.GetFileName(d).ToLowerInvariant().Contains("binary"))
-                    .ToList();
-
-                foreach (var binFolder in binFolders)
+                    .ToList();                foreach (var binFolder in binFolders)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    await ProcessExecutablesInDirectoryAsync(binFolder, apps, processedExecutables, settings, cancellationToken, addAppCallback);
+                    ProcessExecutablesInDirectory(binFolder, apps, processedExecutables, settings, cancellationToken, addAppCallback);
                 }
 
                 // Then process current directory
-                await ProcessExecutablesInDirectoryAsync(directory, apps, processedExecutables, settings, cancellationToken, addAppCallback);
+                ProcessExecutablesInDirectory(directory, apps, processedExecutables, settings, cancellationToken, addAppCallback);
                 
                 // Recursively search subdirectories
                 var subdirectories = Directory.GetDirectories(directory);
@@ -351,20 +346,17 @@ namespace SaveVaultApp.Helpers
                         {
                             continue;
                         }
-                        
-                        // Update progress periodically
-                        if (currentDepth == 0 && i % 10 == 0)
+                          // Update progress less frequently for better performance
+                        if (currentDepth == 0 && i % 25 == 0)
                         {
                             progress?.Report($"Scanning {Path.GetFileName(directory)}... ({i + 1}/{subdirectories.Length} folders)");
                         }
-                        
-                        await SearchDirectoryForExecutablesAsync(subDir, apps, processedExecutables, settings, progress, 
+                          await SearchDirectoryForExecutablesAsync(subDir, apps, processedExecutables, settings, progress, 
                             cancellationToken, maxDepth, currentDepth + 1, addAppCallback);
-                        
-                        // Yield control occasionally
-                        if (i % 5 == 0)
+                          // Check for cancellation less frequently for better performance
+                        if (i % 25 == 0)
                         {
-                            await Task.Delay(1, cancellationToken);
+                            cancellationToken.ThrowIfCancellationRequested();
                         }
                     }
                     catch (OperationCanceledException)
@@ -389,9 +381,8 @@ namespace SaveVaultApp.Helpers
             {
                 Debug.WriteLine($"Error searching directory {directory}: {ex.Message}");
             }
-        }
-          private static async Task ProcessExecutablesInDirectoryAsync(string directory, ObservableCollection<ApplicationInfo> apps, 
-            HashSet<string> processedExecutables, Settings settings, CancellationToken cancellationToken, Action<ApplicationInfo>? addAppCallback = null)        {
+        }        private static void ProcessExecutablesInDirectory(string directory, ObservableCollection<ApplicationInfo> apps, 
+            HashSet<string> processedExecutables, Settings settings, CancellationToken cancellationToken, Action<ApplicationInfo>? addAppCallback = null){
             // Track executables by their filename (without path) to avoid multiple entries for the same program
             var executableNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             
@@ -449,13 +440,11 @@ namespace SaveVaultApp.Helpers
                     }
                     else if (!apps.Any(a => string.Equals(a.ExecutablePath, exePath, StringComparison.OrdinalIgnoreCase)))
                     {
-                        apps.Add(app);
-                    }
-                    
-                    // Yield control occasionally during large file processing
-                    if (i % 20 == 0)
+                        apps.Add(app);                    }
+                      // Check for cancellation less frequently for better performance
+                    if (i % 100 == 0)
                     {
-                        await Task.Delay(1, cancellationToken);
+                        cancellationToken.ThrowIfCancellationRequested();
                     }
                 }
                 catch (OperationCanceledException)

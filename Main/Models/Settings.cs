@@ -215,8 +215,8 @@ public class Settings
             _autoCheckUpdates = value;
             QueueSave();
         }
-    }    // Offline mode setting
-    private bool _offlineMode = false;
+    }    // Offline mode setting - default to true for offline startup
+    private bool _offlineMode = true;
     public bool OfflineMode
     {
         get => _offlineMode;
@@ -645,14 +645,20 @@ public class Settings
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "SaveVault", "Backups");
               if (settings.UpdateCheckInterval <= 0)
-                settings.UpdateCheckInterval = 24;
-            
-            // Set default for change detection (on by default) - only on first run
+                settings.UpdateCheckInterval = 24;            // Set default for change detection (on by default) - only on first run
             if (isFirstRun)
             {                settings.ChangeDetectionEnabled = true;
-                // On first run, default to online mode
-                settings.OfflineMode = false;
-                // Online status is always remembered
+                // On first run, default to offline mode as per application requirements
+                settings.OfflineMode = true;
+                // Online status is remembered between sessions
+            }
+            
+            // Check for environment variable override for offline mode - only on first run
+            string? offlineModeEnv = Environment.GetEnvironmentVariable("SAVEVAULT_OFFLINE_MODE");
+            if (offlineModeEnv == "true" && isFirstRun)
+            {
+                Debug.WriteLine("Environment variable SAVEVAULT_OFFLINE_MODE=true detected and first run, setting offline mode");
+                settings.OfflineMode = true;
             }
 
             // Set this as the static instance

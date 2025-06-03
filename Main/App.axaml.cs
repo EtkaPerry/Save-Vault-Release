@@ -5,6 +5,7 @@ using Avalonia.Data.Core.Plugins;
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia.Markup.Xaml;
 using SaveVaultApp.ViewModels;
 using SaveVaultApp.Views;
@@ -21,7 +22,7 @@ public partial class App : Application
         AvaloniaXamlLoader.Load(this);
     }
 
-    public override void OnFrameworkInitializationCompleted()
+    public override async void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
@@ -183,12 +184,32 @@ public partial class App : Application
             var mainWindow = new MainWindow
             {
                 DataContext = viewModel
-            };
-              // Store the window reference for later showing/hiding
+            };              // Store the window reference for later showing/hiding
             viewModel._mainWindow = mainWindow;
             
-            // Online status is always remembered between sessions
-            logger.Info($"Using saved online/offline status: {(settings.OfflineMode ? "offline" : "online")}");
+            // Check for existing instance after UI infrastructure is set up
+            await HandleSingleInstanceCheckAsync(desktop, logger);
+            
+            // Check if user has explicitly set a preference
+            bool userHasSetPreference = Environment.GetEnvironmentVariable("SAVEVAULT_USER_PREFERENCE_SET") == "true";
+            
+            // Only enforce offline mode on first run, respect user's choice otherwise
+            var isFirstRun = !File.Exists(Settings.GetSettingsPath()) || 
+                             new FileInfo(Settings.GetSettingsPath()).Length < 50;
+            
+            if (isFirstRun && !userHasSetPreference)
+            {
+                logger.Info("First run detected - starting in offline mode as per application requirements");
+                settings.OfflineMode = true;
+                settings.ForceSave();
+                
+                // Make sure the view model is aware of the change
+                viewModel.RefreshOfflineStatus();
+            }
+            else
+            {
+                logger.Info($"Using saved online/offline status: {(settings.OfflineMode ? "offline" : "online")}");
+            }
             // No need to do anything as the settings already have the offline mode set
             
             // Check for updates if enabled and not in offline mode
@@ -216,13 +237,15 @@ public partial class App : Application
                     // Check both the window property and the settings to be sure
                     var currentSettings = Settings.Instance;
                     bool termsWereAccepted = termsWindow.TermsAccepted || currentSettings.TermsAccepted;
-                    
-                    if (termsWereAccepted)
+                      if (termsWereAccepted)
                     {
                         // Terms were accepted, show the main window
                         logger.Info("Terms accepted, showing main window");
                         desktop.MainWindow = mainWindow;
                         mainWindow.Show();
+                        
+                        // Close the transition dialog if it exists
+                        Services.SingleInstanceService.Instance.CloseTransitionDialog();
                         
                         // Now that terms are accepted and main window is shown, start searching for programs
                         logger.Info("Starting program search after terms accepted");
@@ -243,6 +266,9 @@ public partial class App : Application
                 desktop.MainWindow = mainWindow;
                 mainWindow.Show();
                 
+                // Close the transition dialog if it exists
+                Services.SingleInstanceService.Instance.CloseTransitionDialog();
+                
                 // Start searching for programs
                 logger.Info("Starting program search (terms previously accepted)");
                 viewModel.IsSearchEnabled = true;
@@ -251,6 +277,24 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private async Task HandleSingleInstanceCheckAsync(IClassicDesktopStyleApplicationLifetime desktop, LoggingService logger)
+    {
+        logger.Info("HandleSingleInstanceCheckAsync called");
+        
+        // Add a small delay to ensure UI is fully ready
+        await Task.Delay(200);
+        
+        var shouldExit = await Services.SingleInstanceService.Instance.CheckForExistingInstanceAsync();
+        logger.Info($"CheckForExistingInstanceAsync returned: {shouldExit}");
+        if (shouldExit)
+        {
+            logger.Info("User chose to close this instance. Exiting.");
+            desktop.Shutdown();
+            return;
+        }
+        logger.Info("Continuing with current instance");
     }
 
     private void DisableAvaloniaDataAnnotationValidation()

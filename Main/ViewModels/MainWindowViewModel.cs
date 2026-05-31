@@ -14,6 +14,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SaveVaultApp.Models;
 using SaveVaultApp.Services;
+using SaveVaultApp.Utilities;
 using System.Windows.Input;
 using Avalonia.Controls;
 using Avalonia;
@@ -934,7 +935,9 @@ public partial class MainWindowViewModel : ViewModelBase
             {
                 UseShellExecute = true
             };
-            var process = Process.Start(startInfo);
+            // We only launch and forget; dispose the handle immediately so it
+            // doesn't leak (the game process keeps running regardless).
+            Process.Start(startInfo)?.Dispose();
 
             // Wait a short moment and check if process is running
             Task.Delay(500).ContinueWith(_ =>
@@ -1275,7 +1278,7 @@ public partial class MainWindowViewModel : ViewModelBase
 
             foreach (var exePath in knownPaths)
             {
-                var appName = Path.GetFileNameWithoutExtension(exePath);
+                var appName = AppIdentity.ResolveDisplayName(exePath);
                 var app = new ApplicationInfo(_settings)
                 {
                     Name = appName,
@@ -1442,12 +1445,12 @@ public partial class MainWindowViewModel : ViewModelBase
                     try
                     {
                         var fileInfo = new FileInfo(exePath);
-                        if (!ShouldSkipExecutable(fileInfo))
+                        if (!ShouldSkipExecutable(fileInfo) && !AppIdentity.IsObviousJunk(exePath))
                         {
                             processedExecutables.Add(exePath);
-                            
+
                             // Add to apps if not already present
-                            string appName = Path.GetFileNameWithoutExtension(exePath);
+                            string appName = AppIdentity.ResolveDisplayName(exePath);
                             if (!installedApps.Any(a => string.Equals(a.ExecutablePath, exePath, StringComparison.OrdinalIgnoreCase)))
                             {
                                 installedApps.Add(new ApplicationInfo(_settings)
@@ -1944,13 +1947,13 @@ public partial class MainWindowViewModel : ViewModelBase
             try
             {
                 var fileInfo = new FileInfo(exePath);
-                
-                if (ShouldSkipExecutable(fileInfo))
+
+                if (ShouldSkipExecutable(fileInfo) || AppIdentity.IsObviousJunk(exePath))
                     continue;
 
                 string exeName = Path.GetFileName(exePath);
-                string appName = Path.GetFileNameWithoutExtension(exePath);
-                
+                string appName = AppIdentity.ResolveDisplayName(exePath);
+
                 // Skip if we already have an application with this exact executable name
                 if (executableNameMap.ContainsKey(exeName))
                 {
@@ -2552,35 +2555,72 @@ public partial class MainWindowViewModel : ViewModelBase
         _appData.Save();
     }
 
+    // Caches PID -> (process name, main-module path) so the expensive MainModule
+    // lookup below runs only on a cache miss. The name is stored to detect PID
+    // reuse (a recycled PID with a different process name invalidates the entry).
+    private readonly Dictionary<int, (string name, string? path)> _processPathCache = new();
+
     private void UpdateRunningApplications()
     {
         try
         {
             var processes = Process.GetProcesses();
             var currentTime = DateTime.Now;
-            
-            // Get running app paths based on process names
-            var runningExecutables = processes
 
-                .Where(p => !string.IsNullOrEmpty(p.MainWindowTitle)) // Only processes with window titles
-               
-                .Select(p => 
+            // Resolve the set of running executable paths. Reading p.MainModule is
+            // expensive (it opens the process and reads its image path), so results
+            // are cached per PID and only recomputed on a miss — the process list
+            // barely changes between 3-second polls. Every Process handle is
+            // disposed so native handles don't leak across polls.
+            var runningExecutables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var livePids = new HashSet<int>();
+            foreach (var p in processes)
+            {
+                try
                 {
-                    try 
+                    if (string.IsNullOrEmpty(p.MainWindowTitle))
+                        continue; // Only processes with window titles
+
+                    livePids.Add(p.Id);
+
+                    if (!_processPathCache.TryGetValue(p.Id, out var cached) ||
+                        !string.Equals(cached.name, p.ProcessName, StringComparison.OrdinalIgnoreCase))
                     {
-                        return p.MainModule?.FileName;
+                        string? resolvedPath = null;
+                        try { resolvedPath = p.MainModule?.FileName; }
+                        catch { resolvedPath = null; }
+                        cached = (p.ProcessName, resolvedPath);
+                        if (!string.IsNullOrEmpty(resolvedPath))
+                            _processPathCache[p.Id] = cached;
                     }
-                    catch
-                    {
-                        return null;
-                    }
-                })
-                .Where(path => !string.IsNullOrEmpty(path))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                    if (!string.IsNullOrEmpty(cached.path))
+                        runningExecutables.Add(cached.path!);
+                }
+                catch
+                {
+                    // Process may have exited mid-enumeration; skip it.
+                }
+                finally
+                {
+                    p.Dispose();
+                }
+            }
+
+            // Drop cache entries for processes that have exited so the dictionary
+            // stays bounded and stale PIDs don't linger.
+            if (_processPathCache.Count > livePids.Count)
+            {
+                var deadPids = _processPathCache.Keys.Where(pid => !livePids.Contains(pid)).ToList();
+                foreach (var pid in deadPids)
+                    _processPathCache.Remove(pid);
+            }
 
             // Track if any running states actually changed
             bool runningStateChanged = false;
-            
+            // Track whether any last-used time actually changed this tick
+            bool lastUsedChanged = false;
+
             // Update IsRunning flag and LastUsed time for all apps
             foreach (var app in AllInstalledApps)
             {
@@ -2598,6 +2638,7 @@ public partial class MainWindowViewModel : ViewModelBase
                 {
                     app.LastUsed = currentTime;
                     _settings.LastUsedTimes[app.ExecutablePath] = currentTime;
+                    lastUsedChanged = true;
                 }
             }
 
@@ -2625,8 +2666,12 @@ public partial class MainWindowViewModel : ViewModelBase
                 });
             }
 
-            // Save settings after updating last used times
-            _settings.Save();
+            // Persist last-used times only when they actually changed, so the
+            // 3-second process poll no longer writes settings to disk every tick.
+            if (lastUsedChanged)
+            {
+                _settings.Save();
+            }
         }
         catch (Exception ex)
         {
@@ -2970,6 +3015,11 @@ public partial class MainWindowViewModel : ViewModelBase
         // Notify UI about property changes for time-based elements
         Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
+            // Nothing on screen to refresh when the window is hidden (tray) or
+            // minimized — skip the whole per-second fan-out until it's visible again.
+            if (_mainWindow == null || !_mainWindow.IsVisible || _mainWindow.WindowState == WindowState.Minimized)
+                return;
+
             // Update next save text
             UpdateNextSaveText();
               // Force UI refresh for all backup histories
@@ -4788,9 +4838,13 @@ public class ApplicationInfo : ReactiveObject
     // Method to refresh time displays in UI
     public void RefreshTimeDisplays()
     {
-        // Trigger property change notifications for time properties
-        this.RaisePropertyChanged(nameof(LastUsed));
-        this.RaisePropertyChanged(nameof(LastBackupTime));
+        // Only raise change notifications for timestamps that are actually set.
+        // Unset values render nothing, so re-notifying them every second is pure
+        // churn (N property-changed events/sec across every app in the list).
+        if (LastUsed != DateTime.MinValue)
+            this.RaisePropertyChanged(nameof(LastUsed));
+        if (LastBackupTime != DateTime.MinValue)
+            this.RaisePropertyChanged(nameof(LastBackupTime));
     }
 }
 

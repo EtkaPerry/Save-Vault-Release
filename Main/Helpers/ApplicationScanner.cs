@@ -83,10 +83,10 @@ namespace SaveVaultApp.Helpers
                             try
                             {
                                 var fileInfo = new FileInfo(exePath);
-                                if (!ShouldSkipExecutable(fileInfo))
+                                if (!ShouldSkipExecutable(fileInfo) && !AppIdentity.IsObviousJunk(exePath))
                                 {
                                     processedExecutables.Add(exePath);
-                                    string appName = Path.GetFileNameWithoutExtension(exePath);
+                                    string appName = AppIdentity.ResolveDisplayName(exePath);
                                     
                                     var app = new ApplicationInfo(settings)
                                     {
@@ -408,13 +408,13 @@ namespace SaveVaultApp.Helpers
                         continue;
                         
                     var fileInfo = new FileInfo(exePath);
-                    
-                    if (ShouldSkipExecutable(fileInfo))
+
+                    if (ShouldSkipExecutable(fileInfo) || AppIdentity.IsObviousJunk(exePath))
                         continue;
 
                     string exeName = Path.GetFileName(exePath);
-                    string appName = Path.GetFileNameWithoutExtension(exePath);
-                    
+                    string appName = AppIdentity.ResolveDisplayName(exePath);
+
                     // Skip if we already have an application with this exact executable name
                     if (executableNameMap.ContainsKey(exeName))
                     {

@@ -113,59 +113,11 @@ public partial class App : Application
                     logger.Warning($"Settings file exists but is suspiciously small ({fileInfo.Length} bytes). Forcing save.");
                     settings.ForceSave();
                 }
-            }// Check if the settings file was actually created after trying to save
-            // Use our public method to get the settings path
-            string settingsPath = Settings.GetSettingsPath();
-                
-            logger.Info($"Checking for settings file at: {settingsPath}");
-            if (File.Exists(settingsPath))
-            {
-                logger.Info($"✅ Settings file verified at: {settingsPath}");
-                
-                try
-                {
-                    // Try to check if file is readable
-                    string contents = File.ReadAllText(settingsPath);
-                    logger.Info($"Settings file is readable, length: {contents.Length}");
-                    
-                    // Try to parse it as JSON to ensure it's valid
-                    var jsonDocument = System.Text.Json.JsonDocument.Parse(contents);
-                    logger.Info($"Settings file is valid JSON with {jsonDocument.RootElement.EnumerateObject().Count()} properties");
-                }
-                catch (Exception ex)
-                {
-                    logger.Error($"Settings file exists but can't be read or parsed: {ex.Message}");
-                }
             }
-            else
-            {
-                logger.Error($"❌ Settings file doesn't exist at: {settingsPath}");
-                
-                // Check directory permissions
-                try
-                {
-                    var dirPath = Path.GetDirectoryName(settingsPath);
-                    if (dirPath != null)
-                    {
-                        var dirInfo = new DirectoryInfo(dirPath);
-                        logger.Info($"Directory exists: {dirInfo.Exists}, Created: {dirInfo.CreationTime}");
-                        
-                        if (dirInfo.Exists)
-                        {
-                            // Try to create a test file in the directory
-                            string testFile = Path.Combine(dirPath, $"permission_test_{DateTime.Now.Ticks}.txt");
-                            File.WriteAllText(testFile, "Testing write permissions");
-                            logger.Info($"✅ Successfully created test file: {testFile}");
-                            File.Delete(testFile);
-                            logger.Info("✅ Successfully deleted test file");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger.Error($"Permission test failed: {ex.Message}");
-                }
-            }
+
+            // Settings were already loaded and validated above; the redundant
+            // re-read / JSON-reparse / permission-test block was removed to avoid
+            // extra synchronous I/O on the startup path.
             if (settings.Theme != null)
             {
                 // Apply the saved theme

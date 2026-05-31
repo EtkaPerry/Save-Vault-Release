@@ -37,7 +37,7 @@ Save Vault automatically detects installed games on your system and creates back
 ### Prerequisites
 
 - Windows 10/11
-- .NET 9.0 or later
+- No .NET install required (the runtime is bundled in the app)
 
 ### Installation
 

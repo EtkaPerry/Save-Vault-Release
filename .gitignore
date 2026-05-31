@@ -13,3 +13,18 @@ Server/site/download/
 .cache_ggshield
 .last_upload.json
 fun.txt
+
+# Build output (any location, not just /Main)
+[Bb]in/
+[Oo]bj/
+
+# .NET / Visual Studio
+*.user
+.vs/
+
+# Rider / JetBrains
+.idea/
+
+# Local server config backups (may contain secrets — never commit)
+Server/*.backup_*
+*.bak

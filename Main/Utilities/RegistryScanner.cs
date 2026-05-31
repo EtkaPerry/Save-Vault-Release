@@ -601,8 +601,13 @@ namespace SaveVaultApp.Utilities
         
         private static bool IsSystemOrUtilityExecutable(string exePath)
         {
+            // Drop clearly-junk helper processes (browsers, crash handlers, runtime hosts)
+            // via the shared blocklist so all call sites filter consistently.
+            if (AppIdentity.IsObviousJunk(exePath))
+                return true;
+
             string fileName = Path.GetFileName(exePath).ToLowerInvariant();
-            
+
             // Skip common system or utility executables
             return fileName.Contains("unins") ||
                    fileName.Contains("install") ||

@@ -114,10 +114,36 @@ public class SingleInstanceService
     {
         var logger = LoggingService.Instance;
         
+        // Check if this is a restart scenario
+        bool isRestart = Environment.GetEnvironmentVariable("SAVEVAULT_RESTART") == "true";
+        
         // Check if this is a second instance
         bool isSecondInstance = Environment.GetEnvironmentVariable("SAVEVAULT_SECOND_INSTANCE") == "true";
         
-        logger?.Info($"CheckForExistingInstanceAsync called. IsSecondInstance: {isSecondInstance}");
+        logger?.Info($"CheckForExistingInstanceAsync called. IsSecondInstance: {isSecondInstance}, IsRestart: {isRestart}");
+        
+        if (isRestart)
+        {
+            // Clear the restart flag
+            Environment.SetEnvironmentVariable("SAVEVAULT_RESTART", null);
+            
+            // For restart scenarios, we want to terminate the existing instance without showing dialog
+            logger?.Info("Restart scenario detected, terminating existing instance silently");
+            
+            bool terminationSuccessful = await RequestFirstInstanceShutdown();
+            if (terminationSuccessful)
+            {
+                // Reinitialize this instance as the new first instance
+                ReinitializeAsFirstInstance();
+                logger?.Info("Successfully became the new first instance after restart");
+                return false; // Continue with this instance
+            }
+            else
+            {
+                logger?.Warning("Failed to terminate existing instance during restart, continuing anyway");
+                return false; // Continue with this instance anyway
+            }
+        }
         
         if (!isSecondInstance)
         {

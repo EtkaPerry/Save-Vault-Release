@@ -1,0 +1,33 @@
+{  "internalExtensions": {
+    "loadOrder": ["built-in", "user-installed"],      "autoEnable": {
+      "savevault.example": false,
+      "test.button.extension": false,
+      "savevault.turkish": false,
+      "absolute.darkness": true
+    },
+    "extensionPaths": {
+      "builtIn": "Extensions",
+      "userInstalled": "%APPDATA%/SaveVault/Extensions"
+    }
+  },
+  "extensionApi": {    "allowedNamespaces": [
+      "settings",
+      "logging",
+      "file",
+      "ui",
+      "translation",
+      "events"
+    ],
+    "security": {
+      "sandboxed": true,
+      "allowFileAccess": "extensionOnly",
+      "allowNetworkAccess": false,
+      "allowUIModification": true
+    }
+  },
+  "developerMode": {
+    "enabled": true,
+    "allowUnsignedExtensions": true,
+    "debugLogging": true
+  }
+}

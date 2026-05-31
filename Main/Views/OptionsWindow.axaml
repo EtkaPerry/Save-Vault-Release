@@ -153,22 +153,35 @@
                     <!-- Appearance Panel -->
                     <StackPanel Name="AppearancePanel" IsVisible="False">
                         <TextBlock Text="Appearance" FontSize="18" FontWeight="Bold" Margin="0,0,0,15"/>
-                        
-                        <!-- Theme Selection -->
+                          <!-- Theme Selection -->
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                             <TextBlock Text="Theme:" 
                                      VerticalAlignment="Center" 
-                                     Width="120"/>
-                            <ComboBox Width="200" 
+                                     Width="120"/>                            <ComboBox Width="200" 
+                                     ItemsSource="{Binding AvailableThemes}"
                                      SelectedItem="{Binding SelectedTheme}"
                                      Background="{DynamicResource ListItemBackground}">
-                                <ComboBox.Items>
-                                    <x:String>System</x:String>
-                                    <x:String>Light</x:String>
-                                    <x:String>Dark</x:String>
-                                </ComboBox.Items>
                             </ComboBox>
                         </StackPanel>
+                        
+                        <!-- Language Selection -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Language:" 
+                                     VerticalAlignment="Center" 
+                                     Width="120"/>
+                            <ComboBox Width="200" 
+                                     ItemsSource="{Binding AvailableLanguages}"
+                                     SelectedItem="{Binding SelectedLanguage}"
+                                     Background="{DynamicResource ListItemBackground}">
+                            </ComboBox>
+                        </StackPanel>
+                        
+                        <!-- Language Help Text -->
+                        <TextBlock Text="Extensions can provide additional language translations" 
+                                   TextWrapping="Wrap" 
+                                   Opacity="0.7" 
+                                   Margin="120,5,0,15"
+                                   FontStyle="Italic"/>
                         
                         <!-- Status message -->
                         <TextBlock Text="Changes are saved automatically" 

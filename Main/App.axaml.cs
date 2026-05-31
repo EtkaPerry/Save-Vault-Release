@@ -179,12 +179,64 @@ public partial class App : Application
             
             // Create the ViewModel and MainWindow
             var viewModel = new MainWindowViewModel();
-            viewModel.IsSearchEnabled = false; // Disable searching until terms are accepted
+            viewModel.IsSearchEnabled = false; // Disable searching until terms are accepted            // Initialize services
+            try
+            {
+                logger.Info("Initializing language manager...");
+                LanguageManager.Instance.Initialize();
+                logger.Info("Language manager initialized successfully");
+                
+                logger.Info("Initializing UI translation service...");
+                UITranslationService.Instance.Initialize(this);
+                logger.Info("UI translation service initialized successfully");
+                  logger.Info("Initializing extension services...");
+                _ = ExtensionService.Instance; // Initialize the extension service
+                logger.Info("Extension service initialized successfully");
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"Failed to initialize extension services: {ex.Message}");
+            }
             
             var mainWindow = new MainWindow
             {
                 DataContext = viewModel
-            };              // Store the window reference for later showing/hiding
+            };
+
+            // Initialize extension UI service with main window reference
+            try
+            {
+                logger.Info("Initializing extension UI service...");
+                ExtensionUIService.Instance.Initialize(mainWindow);
+                logger.Info("Extension UI service initialized successfully");
+                
+                // Now load all enabled extensions after UI is ready
+                logger.Info("Loading enabled extensions...");
+                ExtensionService.Instance.LoadEnabledExtensions();
+                logger.Info("Enabled extensions loaded successfully");
+
+                // Re-apply a previously selected theme extension so it persists across restarts
+                var selectedThemeExtId = settings.GetExtensionSetting("app.theme.selected");
+                if (!string.IsNullOrEmpty(selectedThemeExtId))
+                {
+                    var themeExt = ExtensionService.Instance.FindInstalledExtensionById(selectedThemeExtId);
+                    if (themeExt != null && themeExt.IsEnabled && themeExt.Category == ExtensionCategory.Theming)
+                    {
+                        logger.Info($"Re-applying saved theme extension: {selectedThemeExtId}");
+                        RequestedThemeVariant = ThemeVariant.Dark;
+                        LuaEngine.Instance.ApplyThemeExtension(themeExt);
+                    }
+                    else
+                    {
+                        // Saved theme extension is no longer available; fall back cleanly
+                        settings.SetExtensionSetting("app.theme.selected", "");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Error($"Failed to initialize extension UI service: {ex.Message}");
+            }              // Store the window reference for later showing/hiding
             viewModel._mainWindow = mainWindow;
             
             // Check for existing instance after UI infrastructure is set up
@@ -224,12 +276,23 @@ public partial class App : Application
             {
                 logger.Info("Offline mode active. Skipping update and notification checks.");
             }
-            
-            // Show Terms and Conditions if not accepted yet
+              // Show Terms and Conditions if not accepted yet
             if (!settings.TermsAccepted)
             {
                 logger.Info("Terms not yet accepted, showing Terms and Conditions window");
                 var termsWindow = new TermsWindow();
+                
+                // Register the terms window with UITranslationService for translations
+                try
+                {
+                    UITranslationService.Instance.TrackNewWindow(termsWindow);
+                    logger.Info("Registered TermsWindow with UITranslationService for translations");
+                }
+                catch (Exception ex)
+                {
+                    logger.Warning($"Failed to register TermsWindow with UITranslationService: {ex.Message}");
+                }
+                
                 termsWindow.Show();
                   // Only proceed with showing the main window after terms are accepted
                 termsWindow.Closed += (sender, args) =>

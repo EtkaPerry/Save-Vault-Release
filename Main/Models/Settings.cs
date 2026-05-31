@@ -122,8 +122,7 @@ public class Settings
             QueueSave();
         }
     }
-    
-    // Theme setting
+      // Theme setting
     private string? _theme = "System";
     public string? Theme
     {
@@ -132,6 +131,35 @@ public class Settings
         {
             _theme = value;
             QueueSave();
+        }
+    }    // Language setting
+    private string _language = "en-US";
+    public string Language
+    {
+        get => _language;
+        set
+        {
+            if (_language != value)
+            {
+                var previousValue = _language;
+                _language = value;
+                
+                // Log the change
+                Debug.WriteLine($"Language changed from {previousValue} to {value}");
+                var logger = Services.LoggingService.Instance;
+                if (logger != null)
+                {
+                    logger.Info($"Language changed to {value} - auto-saving settings");
+                }
+                
+                // Update extension translation service
+                Services.ExtensionTranslationService.Instance.SetLanguage(value);
+                
+                // Trigger language change event for extensions
+                Services.ExtensionEventService.Instance.TriggerEvent("app.language.changed", value);
+                
+                QueueSave();
+            }
         }
     }
     
@@ -534,6 +562,54 @@ public class Settings
             _lastFileStates = value;
             QueueSave();
         }
+    }
+    
+    // Extension settings storage
+    private Dictionary<string, string> _extensionSettings = new();
+    public Dictionary<string, string> ExtensionSettings
+    {
+        get => _extensionSettings;
+        set
+        {
+            _extensionSettings = value;
+            QueueSave();
+        }
+    }
+    
+    // Installed extensions list
+    private HashSet<string> _installedExtensions = new();
+    public HashSet<string> InstalledExtensions
+    {
+        get => _installedExtensions;
+        set
+        {
+            _installedExtensions = value;
+            QueueSave();
+        }
+    }
+    
+    // Enabled extensions list
+    private HashSet<string> _enabledExtensions = new();
+    public HashSet<string> EnabledExtensions
+    {
+        get => _enabledExtensions;
+        set
+        {
+            _enabledExtensions = value;
+            QueueSave();
+        }
+    }
+
+    // Disabled built-in extensions list - tracks which built-in extensions the user has explicitly uninstalled
+    private HashSet<string> _disabledBuiltInExtensions = new();
+    public HashSet<string> DisabledBuiltInExtensions
+    {
+        get => _disabledBuiltInExtensions;
+        set
+        {
+            _disabledBuiltInExtensions = value;
+            QueueSave();
+        }
     }    // Constructor that ensures this instance is the current static instance
     public Settings()
     {
@@ -618,11 +694,14 @@ public class Settings
             settings.CustomNames ??= new();
             settings.CustomSavePaths ??= new();
             settings.HiddenApps ??= new();
-            settings.KnownApplicationPaths ??= new();
-            settings.AppSettings ??= new();
+            settings.KnownApplicationPaths ??= new();            settings.AppSettings ??= new();
             settings.BackupHistory ??= new();
             settings.LastFileStates ??= new();
             settings.Notifications ??= new();
+            settings.ExtensionSettings ??= new();
+            settings.InstalledExtensions ??= new();
+            settings.EnabledExtensions ??= new();
+            settings.DisabledBuiltInExtensions ??= new();
 
             // Set default values for any unset properties
             if (string.IsNullOrEmpty(settings.SortOption))
@@ -630,6 +709,9 @@ public class Settings
             
             if (string.IsNullOrEmpty(settings.Theme))
                 settings.Theme = "System";
+            
+            if (string.IsNullOrEmpty(settings.Language))
+                settings.Language = "en-US";
             
             if (settings.AutoSaveInterval <= 0)
                 settings.AutoSaveInterval = 15;
@@ -967,6 +1049,160 @@ public class Settings
         return false;  // No changes detected
     }
     
+    // Extension settings methods
+    public string? GetExtensionSetting(string key)
+    {
+        return ExtensionSettings.TryGetValue(key, out var value) ? value : null;
+    }
+    
+    public void SetExtensionSetting(string key, string value)
+    {
+        ExtensionSettings[key] = value;
+        QueueSave();
+    }
+    
+    public bool RemoveExtensionSetting(string key)
+    {
+        var result = ExtensionSettings.Remove(key);
+        if (result)
+        {
+            QueueSave();
+        }
+        return result;
+    }
+    
+    public bool IsExtensionInstalled(string extensionId)
+    {
+        return !string.IsNullOrWhiteSpace(extensionId) && InstalledExtensions.Contains(extensionId);
+    }
+    
+    public void AddInstalledExtension(string extensionId)
+    {
+        if (string.IsNullOrWhiteSpace(extensionId))
+            return;
+            
+        if (InstalledExtensions.Add(extensionId))
+        {
+            Services.LoggingService.Instance.Info($"Added extension to installed list in settings: {extensionId}");
+            QueueSave();
+        }
+    }
+    
+    public bool RemoveInstalledExtension(string extensionId)
+    {
+        if (string.IsNullOrWhiteSpace(extensionId))
+            return false;
+            
+        var result = InstalledExtensions.Remove(extensionId);
+        if (result)
+        {
+            Services.LoggingService.Instance.Info($"Removed extension from installed list in settings: {extensionId}");
+            // Also remove from enabled extensions
+            EnabledExtensions.Remove(extensionId);
+            QueueSave();
+        }
+        return result;
+    }
+    
+    public bool IsBuiltInExtensionDisabled(string extensionId)
+    {
+        return !string.IsNullOrWhiteSpace(extensionId) && DisabledBuiltInExtensions.Contains(extensionId);
+    }
+
+    public void AddDisabledBuiltInExtension(string extensionId)
+    {
+        if (string.IsNullOrWhiteSpace(extensionId))
+            return;
+            
+        if (DisabledBuiltInExtensions.Add(extensionId))
+        {
+            Services.LoggingService.Instance.Info($"Added built-in extension to disabled list: {extensionId}");
+            QueueSave();
+        }
+    }
+
+    public bool RemoveDisabledBuiltInExtension(string extensionId)
+    {
+        if (string.IsNullOrWhiteSpace(extensionId))
+            return false;
+            
+        var result = DisabledBuiltInExtensions.Remove(extensionId);
+        if (result)
+        {
+            Services.LoggingService.Instance.Info($"Removed built-in extension from disabled list: {extensionId}");
+            QueueSave();
+        }
+        return result;
+    }
+    
+    public bool IsExtensionEnabled(string extensionId)
+    {
+        if (string.IsNullOrWhiteSpace(extensionId))
+            return false;
+            
+        return EnabledExtensions.Contains(extensionId);
+    }
+    
+    public void SetExtensionEnabled(string extensionId, bool enabled)
+    {
+        if (string.IsNullOrWhiteSpace(extensionId))
+            return;
+            
+        if (enabled)
+        {
+            if (EnabledExtensions.Add(extensionId))
+            {
+                Services.LoggingService.Instance.Info($"Enabled extension in settings: {extensionId}");
+                QueueSave();
+            }
+        }
+        else
+        {
+            if (EnabledExtensions.Remove(extensionId))
+            {
+                Services.LoggingService.Instance.Info($"Disabled extension in settings: {extensionId}");
+                QueueSave();
+            }
+        }
+    }
+      // Method to clean up any empty extensions
+    public void CleanupInvalidExtensions()
+    {
+        var emptyOrInvalid = InstalledExtensions.Where(id => string.IsNullOrWhiteSpace(id)).ToList();
+        foreach (var id in emptyOrInvalid)
+        {
+            InstalledExtensions.Remove(id);
+            Services.LoggingService.Instance.Warning($"Removed invalid extension ID from installed list: '{id}'");
+        }
+        
+        emptyOrInvalid = EnabledExtensions.Where(id => string.IsNullOrWhiteSpace(id)).ToList();
+        foreach (var id in emptyOrInvalid)
+        {
+            EnabledExtensions.Remove(id);
+            Services.LoggingService.Instance.Warning($"Removed invalid extension ID from enabled list: '{id}'");
+        }
+
+        emptyOrInvalid = DisabledBuiltInExtensions.Where(id => string.IsNullOrWhiteSpace(id)).ToList();
+        foreach (var id in emptyOrInvalid)
+        {
+            DisabledBuiltInExtensions.Remove(id);
+            Services.LoggingService.Instance.Warning($"Removed invalid extension ID from disabled built-in list: '{id}'");
+        }
+        
+        // Also remove enabled extensions that aren't installed
+        var enabledButNotInstalled = EnabledExtensions.Where(id => !InstalledExtensions.Contains(id)).ToList();
+        foreach (var id in enabledButNotInstalled)
+        {
+            EnabledExtensions.Remove(id);
+            Services.LoggingService.Instance.Warning($"Removed extension ID from enabled list because it's not installed: '{id}'");
+        }
+        
+        if (emptyOrInvalid.Any() || enabledButNotInstalled.Any())
+        {
+            QueueSave();
+        }
+    }
+    
     // Debug method to verify paths
     public static void DebugEnvironmentPaths()
     {
@@ -1029,6 +1265,11 @@ public class Settings
         {
             logger.Error($"Error in DebugEnvironmentPaths: {ex.Message}");
         }
+    }
+
+    public Dictionary<string, string> GetAllExtensionSettings()
+    {
+        return new Dictionary<string, string>(ExtensionSettings);
     }
 }
 

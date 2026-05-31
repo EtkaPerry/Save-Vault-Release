@@ -1,0 +1,16 @@
+{
+  "id": "savevault.turkish",
+  "name": "Turkish Language Pack",
+  "version": "1.0.0",
+  "description": "Adds Turkish (Türkçe) language support to SaveVault. This extension provides complete Turkish translations for the application interface.",
+  "author": "SaveVault Community",
+  "category": "Localization",
+  "icon": "logo.png",
+  "main": "main.lua",  "minimumVersion": "0.2.8",
+  "isOfficial": true,
+  "tags": ["language", "localization", "turkish", "türkçe", "translation", "official"],
+  "createdDate": "2025-06-04T00:00:00Z",
+  "updatedDate": "2025-06-04T00:00:00Z",
+  "downloadCount": 0,
+  "rating": 5.0
+}

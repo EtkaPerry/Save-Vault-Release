@@ -20,13 +20,15 @@ sealed class Program
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.    [STAThread]
     public static void Main(string[] args)
-    {
-        // Create a named mutex to prevent multiple instances
+    {        // Create a named mutex to prevent multiple instances
         const string mutexName = "SaveVaultApp_SingleInstance_Mutex";
         bool createdNew;
         
         // Check if we're explicitly marked as a second instance first
         bool explicitSecondInstance = Environment.GetEnvironmentVariable("SAVEVAULT_SECOND_INSTANCE") == "true";
+        
+        // Check if we're restarting due to theme extension changes
+        bool isRestartMode = Environment.GetEnvironmentVariable("SAVEVAULT_RESTART_MODE") == "true";
         
         try
         {
@@ -39,16 +41,17 @@ sealed class Program
             createdNew = true;
         }
         
-        if (!createdNew && !explicitSecondInstance)
+        if (!createdNew && !explicitSecondInstance && !isRestartMode)
         {
             // Another instance is already running - let App handle this
             Environment.SetEnvironmentVariable("SAVEVAULT_SECOND_INSTANCE", "true");
         }
-        else if (createdNew && explicitSecondInstance)
+        else if (createdNew && (explicitSecondInstance || isRestartMode))
         {
-            // We were marked as second instance but we got the mutex - clear the flag
+            // We were marked as second instance or restart mode but we got the mutex
             // This happens when the first instance terminated and we became the new first instance
             Environment.SetEnvironmentVariable("SAVEVAULT_SECOND_INSTANCE", null);
+            Environment.SetEnvironmentVariable("SAVEVAULT_RESTART_MODE", null);
         }
         
         // Set default environment variable for offline mode only if this appears to be first run

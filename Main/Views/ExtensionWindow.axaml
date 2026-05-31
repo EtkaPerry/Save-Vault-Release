@@ -1,0 +1,448 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SaveVaultApp.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:models="using:SaveVaultApp.Models"
+        xmlns:utilities="using:SaveVaultApp.Utilities"
+        mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+        x:Class="SaveVaultApp.Views.ExtensionWindow"
+        x:DataType="vm:ExtensionViewModel"
+        Title="Extension Manager"
+        Icon="/Assets/logo.ico"
+        Width="1000" Height="700"
+        MinWidth="800" MinHeight="600"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource PanelBackground}">
+
+    <Window.Styles>
+        <Style Selector="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextColor}" />
+        </Style>
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="#FF9800"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="Button.primary:pointerover">
+            <Setter Property="Background" Value="#F57C00"/>
+        </Style>
+        <Style Selector="Button.secondary">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="#FF9800"/>
+            <Setter Property="Foreground" Value="#FF9800"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="Button.secondary:pointerover">
+            <Setter Property="Background" Value="#FF980020"/>
+        </Style>
+        <Style Selector="Button.success">
+            <Setter Property="Background" Value="#4CAF50"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="Button.success:pointerover">
+            <Setter Property="Background" Value="#388E3C"/>
+        </Style>
+        <Style Selector="Button.danger">
+            <Setter Property="Background" Value="#f44336"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style Selector="Button.danger:pointerover">
+            <Setter Property="Background" Value="#d32f2f"/>
+        </Style>
+    </Window.Styles>
+
+    <Design.DataContext>
+        <vm:ExtensionViewModel/>
+    </Design.DataContext>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Background="{DynamicResource TitleBarBackground}" Padding="20,15">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Extension Manager" 
+                             FontSize="24" 
+                             FontWeight="Bold"/>
+                    <TextBlock Text="Discover and manage extensions for SaveVault" 
+                             Foreground="{DynamicResource SecondaryTextColor}"
+                             Margin="0,5,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                    <Button Command="{Binding ImportExtensionCommand}"
+                            Classes="secondary"
+                            Padding="12,8">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <PathIcon Data="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" Width="16" Height="16"/>
+                            <TextBlock Text="Import"/>
+                        </StackPanel>
+                    </Button>
+                    
+                    <Button Command="{Binding RefreshExtensionsCommand}"
+                            Classes="secondary"
+                            Padding="12,8">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <PathIcon Data="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z" Width="16" Height="16"/>
+                            <TextBlock Text="Refresh"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Main Content -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="250"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Sidebar -->
+            <Border Grid.Column="0" Background="{DynamicResource SidebarBackground}" Padding="20">
+                <StackPanel Spacing="20">
+                    <!-- Search -->
+                    <StackPanel>
+                        <TextBlock Text="Search" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                        <TextBox Text="{Binding SearchText}" 
+                               Watermark="Search extensions..."
+                               Background="{DynamicResource TextBoxBackground}"/>
+                    </StackPanel>
+
+                    <!-- Categories -->
+                    <StackPanel>
+                        <TextBlock Text="Categories" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                        <ListBox ItemsSource="{Binding Categories}"
+                               SelectedItem="{Binding SelectedCategory}"
+                               Background="Transparent"
+                               BorderThickness="0">
+                            <ListBox.Styles>
+                                <Style Selector="ListBoxItem">
+                                    <Setter Property="Padding" Value="8,6"/>
+                                    <Setter Property="Margin" Value="0,1"/>
+                                    <Setter Property="Background" Value="Transparent"/>
+                                    <Setter Property="CornerRadius" Value="3"/>
+                                </Style>
+                                <Style Selector="ListBoxItem:pointerover /template/ ContentPresenter">
+                                    <Setter Property="Background" Value="{DynamicResource ListItemBackgroundHover}"/>
+                                </Style>
+                                <Style Selector="ListBoxItem:selected /template/ ContentPresenter">
+                                    <Setter Property="Background" Value="#FF9800"/>
+                                </Style>
+                            </ListBox.Styles>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="models:ExtensionCategory">
+                                    <TextBlock Text="{Binding}"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </StackPanel>                    <!-- Filters -->
+                    <StackPanel>
+                        <TextBlock Text="Filters" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                        <CheckBox IsChecked="{Binding ShowOnlyOfficial}" Content="Show Only Official"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Tab control for Download Extensions and My Extensions -->
+            <Border Grid.Column="1" Background="{DynamicResource MainBackground}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>                    <!-- Tab Buttons -->
+                    <Grid Grid.Row="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>                        <Button Grid.Column="0" 
+                                Command="{Binding SelectTabCommand}" 
+                                CommandParameter="download"
+                                Height="50"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                VerticalContentAlignment="Center"
+                                Background="{Binding DownloadTabBackground}"
+                                Foreground="{Binding DownloadTabForeground}"
+                                BorderThickness="0"
+                                Margin="0">
+                            <Grid>
+                                <TextBlock Text="Download Extensions" 
+                                         HorizontalAlignment="Center"
+                                         VerticalAlignment="Center"/>
+                                <Border Background="{DynamicResource SidebarBackground}" 
+                                      Width="24" Height="24" 
+                                      CornerRadius="12"
+                                      HorizontalAlignment="Right"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding DownloadableExtensionsCount}"
+                                             FontSize="11"
+                                             Foreground="{DynamicResource SecondaryTextColor}"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                        </Button>
+                                
+                        <Button Grid.Column="1" 
+                                Command="{Binding SelectTabCommand}" 
+                                CommandParameter="installed"
+                                Height="50"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                VerticalContentAlignment="Center"
+                                Background="{Binding InstalledTabBackground}"
+                                Foreground="{Binding InstalledTabForeground}"
+                                BorderThickness="0"
+                                Margin="0">
+                            <Grid>
+                                <TextBlock Text="My Extensions" 
+                                         HorizontalAlignment="Center"
+                                         VerticalAlignment="Center"/>
+                                <Border Background="{DynamicResource SidebarBackground}" 
+                                      Width="24" Height="24" 
+                                      CornerRadius="12"
+                                      HorizontalAlignment="Right"
+                                      VerticalAlignment="Center"
+                                      Margin="0,0,10,0">
+                                    <TextBlock Text="{Binding InstalledExtensionsCount}"
+                                             FontSize="11"
+                                             Foreground="{DynamicResource SecondaryTextColor}"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                        </Button>
+                    </Grid>
+                      <!-- Tab Content Container -->
+                    <Grid Grid.Row="1">
+                        <!-- Loading Indicator -->
+                        <Grid IsVisible="{Binding IsLoading}" Margin="0,20,0,0">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="15">
+                                <ProgressBar IsIndeterminate="True" Width="200" Height="4"/>
+                                <TextBlock Text="{Binding StatusMessage}" 
+                                         HorizontalAlignment="Center"
+                                         Foreground="{DynamicResource SecondaryTextColor}"/>
+                            </StackPanel>
+                        </Grid>                        <!-- Extension List -->
+                        <ScrollViewer IsVisible="{Binding !IsLoading}" 
+                                    Padding="20,20,20,0"
+                                    HorizontalScrollBarVisibility="Disabled"
+                                    VerticalScrollBarVisibility="Auto"
+                                    Margin="0,0,2,0">
+                            <ScrollViewer.Styles>
+                                <Style Selector="ScrollBar">
+                                    <Setter Property="Background" Value="Transparent"/>
+                                    <Setter Property="Opacity" Value="0.4"/>
+                                    <Setter Property="Cursor" Value="Arrow"/>
+                                    <Setter Property="AllowAutoHide" Value="False"/>
+                                    <Setter Property="Transitions">
+                                        <Transitions>
+                                            <DoubleTransition Property="Opacity" Duration="0:0:0.2"/>
+                                        </Transitions>
+                                    </Setter>
+                                </Style>
+                                <Style Selector="ScrollBar:vertical">
+                                    <Setter Property="Width" Value="8"/>
+                                </Style>
+                                <Style Selector="ScrollBar:pointerover">
+                                    <Setter Property="Opacity" Value="0.8"/>
+                                </Style>
+                                <Style Selector="ScrollBar /template/ RepeatButton">
+                                    <Setter Property="Background" Value="Transparent"/>
+                                </Style>
+                                <Style Selector="ScrollBar /template/ Thumb">
+                                    <Setter Property="Background" Value="#555555"/>
+                                    <Setter Property="MinHeight" Value="40"/>
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                                <Style Selector="ScrollBar /template/ Thumb:pointerover">
+                                    <Setter Property="Background" Value="#777777"/>
+                                </Style>
+                                <Style Selector="ScrollBar /template/ Thumb:pressed">
+                                    <Setter Property="Background" Value="#FF9800"/>
+                                </Style>                            </ScrollViewer.Styles>
+                            <ItemsControl ItemsSource="{Binding FilteredExtensions}" Margin="0,0,0,20">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:Extension">
+                                        <Border Background="{DynamicResource ListItemBackground}"
+                                              CornerRadius="8"
+                                              Padding="20"
+                                              Margin="0,0,0,15">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <!-- Extension Icon -->
+                                                <Border Grid.Column="0" 
+                                                      Width="64" Height="64" 
+                                                      CornerRadius="8"
+                                                      Background="{DynamicResource SidebarBackground}"
+                                                      Margin="0,0,15,0">
+                                                    <!-- Show extension icon if available, otherwise show default star icon -->
+                                                    <Panel>
+                                                        <!-- Use the preloaded bitmap directly -->
+                                                        <Image Source="{Binding IconBitmap}" 
+                                                               Width="64" Height="64"
+                                                               Stretch="Uniform"
+                                                               IsVisible="{Binding HasIcon}"/>
+                                                        
+                                                        <!-- Fallback icon -->
+                                                        <PathIcon Data="M12,2L13.09,8.26L22,9L13.09,9.74L12,16L10.91,9.74L2,9L10.91,8.26L12,2Z" 
+                                                                Width="32" Height="32"
+                                                                Foreground="#FF9800"
+                                                                IsVisible="{Binding HasIcon, Converter={x:Static utilities:BoolConverters.Not}}"/>
+                                                    </Panel>
+                                                </Border>
+
+                                                <!-- Extension Info -->
+                                                <StackPanel Grid.Column="1" Spacing="8">
+                                                    <StackPanel Orientation="Horizontal" Spacing="10">
+                                                        <TextBlock Text="{Binding Name}" 
+                                                                 FontSize="18" 
+                                                                 FontWeight="SemiBold"/>
+                                                        <Border Background="#FF9800" 
+                                                              CornerRadius="3" 
+                                                              Padding="6,2"
+                                                              IsVisible="{Binding IsInstalled}">
+                                                            <TextBlock Text="INSTALLED" 
+                                                                     FontSize="10" 
+                                                                     FontWeight="Bold"
+                                                                     Foreground="White"/>
+                                                        </Border>
+                                                        <Border Background="#4CAF50" 
+                                                              CornerRadius="3" 
+                                                              Padding="6,2"
+                                                              IsVisible="{Binding IsEnabled}">
+                                                            <TextBlock Text="ENABLED" 
+                                                                     FontSize="10" 
+                                                                     FontWeight="Bold"
+                                                                     Foreground="White"/>
+                                                        </Border>
+                                                    </StackPanel>
+
+                                                    <TextBlock Text="{Binding Description}" 
+                                                             TextWrapping="Wrap"
+                                                             Foreground="{DynamicResource SecondaryTextColor}"/>
+
+                                                    <StackPanel Orientation="Horizontal" Spacing="20">
+                                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                                            <PathIcon Data="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z" 
+                                                                    Width="14" Height="14"
+                                                                    Foreground="{DynamicResource SecondaryTextColor}"/>
+                                                            <TextBlock Text="{Binding Author}" 
+                                                                     FontSize="12"
+                                                                     Foreground="{DynamicResource SecondaryTextColor}"/>
+                                                        </StackPanel>
+
+                                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                                            <PathIcon Data="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,17L7,12L8.41,10.59L12,14.17L15.59,10.59L17,12L12,17Z" 
+                                                                    Width="14" Height="14"
+                                                                    Foreground="{DynamicResource SecondaryTextColor}"/>
+                                                            <TextBlock Text="{Binding Version}" 
+                                                                     FontSize="12"
+                                                                     Foreground="{DynamicResource SecondaryTextColor}"/>
+                                                        </StackPanel>
+
+                                                        <StackPanel Orientation="Horizontal" Spacing="5">
+                                                            <PathIcon Data="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.46,13.97L5.82,21L12,17.27Z" 
+                                                                    Width="14" Height="14"
+                                                                    Foreground="#FFD700"/>
+                                                            <TextBlock Text="{Binding Rating}" 
+                                                                     FontSize="12"
+                                                                     Foreground="{DynamicResource SecondaryTextColor}"/>
+                                                        </StackPanel>
+
+                                                        <Border Background="{DynamicResource SidebarBackground}" 
+                                                              CornerRadius="3" 
+                                                              Padding="6,2">
+                                                            <TextBlock Text="{Binding CategoryDisplayName}" 
+                                                                     FontSize="10" 
+                                                                     FontWeight="SemiBold"
+                                                                     Foreground="{DynamicResource TextColor}"/>
+                                                        </Border>
+                                                    </StackPanel>
+                                                </StackPanel>                                                <!-- Action Buttons -->
+                                                <StackPanel Grid.Column="2" Orientation="Vertical" Spacing="8" 
+                                                          VerticalAlignment="Center">
+                                                    <!-- Enable/Disable Toggle (only for installed extensions in installed tab) -->
+                                                    <ToggleSwitch IsChecked="{Binding IsEnabled, Mode=OneWay}"
+                                                                Command="{Binding $parent[Window].((vm:ExtensionViewModel)DataContext).ToggleExtensionCommand}"
+                                                                CommandParameter="{Binding}"
+                                                                OnContent="Enabled" 
+                                                                OffContent="Disabled"
+                                                                HorizontalAlignment="Right">
+                                                        <ToggleSwitch.IsVisible>
+                                                            <MultiBinding Converter="{x:Static utilities:BoolAndBoolConverter.Instance}">
+                                                                <Binding Path="IsInstalled"/>
+                                                                <Binding Path="$parent[Window].((vm:ExtensionViewModel)DataContext).IsInstalledTab"/>
+                                                            </MultiBinding>
+                                                        </ToggleSwitch.IsVisible>
+                                                    </ToggleSwitch>
+
+                                                    <!-- Install/Uninstall Button -->
+                                                    <Button IsVisible="{Binding !IsInstalled}"
+                                                          Command="{Binding $parent[Window].((vm:ExtensionViewModel)DataContext).InstallExtensionCommand}"
+                                                          CommandParameter="{Binding}"
+                                                          Classes="primary"
+                                                          Padding="12,8"
+                                                          HorizontalAlignment="Right">
+                                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                                            <PathIcon Data="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z" Width="14" Height="14"/>
+                                                            <TextBlock Text="{Binding InstallButtonText}"/>
+                                                        </StackPanel>
+                                                    </Button>
+
+                                                    <Button IsVisible="{Binding IsInstalled}"
+                                                          Command="{Binding $parent[Window].((vm:ExtensionViewModel)DataContext).UninstallExtensionCommand}"
+                                                          CommandParameter="{Binding}"
+                                                          Classes="danger"
+                                                          Padding="12,8"
+                                                          HorizontalAlignment="Right"><StackPanel Orientation="Horizontal" Spacing="6">
+                                                            <PathIcon Data="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z" Width="14" Height="14"/>
+                                                            <TextBlock Text="Uninstall"/>
+                                                        </StackPanel>
+                                                    </Button>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Status Bar -->
+        <Border Grid.Row="2" Background="{DynamicResource StatusBarBackground}" Padding="20,10">
+            <TextBlock Text="{Binding StatusMessage}" 
+                     Foreground="{DynamicResource SecondaryTextColor}"/>
+        </Border>
+    </Grid>
+</Window>

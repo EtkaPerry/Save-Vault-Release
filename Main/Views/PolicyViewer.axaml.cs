@@ -183,7 +183,7 @@ namespace SaveVaultApp.Views
             
             // Set the policy URL
             string urlSuffix = policyName.ToLower().Replace(" ", "-");
-            viewer._policyUrl = $"https://vault.etka.co.uk/{urlSuffix}";
+            viewer._policyUrl = $"https://etka.helioho.st/{urlSuffix}";
             
             try
             {

@@ -5,6 +5,7 @@ using Avalonia.Interactivity;
 using SaveVaultApp.ViewModels;
 using SaveVaultApp.Models;
 using SaveVaultApp.Utilities;
+using SaveVaultApp.Services;
 using System.IO;
 using System;
 using System.Threading.Tasks;
@@ -135,10 +136,20 @@ public partial class OptionsWindow : Window
         {
             securityButton.Click += (s, e) => LoadLegalDocument("SecurityPolicy");
         }
-        
-        if (privacyButton != null)
+          if (privacyButton != null)
         {
             privacyButton.Click += (s, e) => LoadLegalDocument("PrivacyPolicy");
+        }
+        
+        // Register with UITranslationService for translations
+        try
+        {
+            SaveVaultApp.Services.UITranslationService.Instance.TrackNewWindow(this);
+            LoggingService.Instance.Info("OptionsWindow registered with UITranslationService for translations");
+        }
+        catch (Exception ex)
+        {
+            LoggingService.Instance.Warning($"Failed to register OptionsWindow with UITranslationService: {ex.Message}");
         }
     }
     
@@ -159,67 +170,70 @@ public partial class OptionsWindow : Window
             viewModel.UpdateFromSettings();
         });
     }
-    
-    private void OptionsList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+      private void OptionsList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (sender is ListBox listBox)
         {
-            if (listBox.SelectedItem is ListBoxItem item)
-            {                // Hide all panels first
-                if (_generalPanel != null) _generalPanel.IsVisible = false;
-                if (_appearancePanel != null) _appearancePanel.IsVisible = false;
-                if (_storagePanel != null) _storagePanel.IsVisible = false;
-                if (_updatesPanel != null) _updatesPanel.IsVisible = false;
-                if (_legalPanel != null) _legalPanel.IsVisible = false;
-                if (_creditPanel != null) _creditPanel.IsVisible = false;
-                
-                // Show the selected panel
-                switch (item.Content as string)
-                {
-                    case "General":
-                        if (_generalPanel != null) _generalPanel.IsVisible = true;
-                        break;
-                    case "Appearance":
-                        if (_appearancePanel != null) _appearancePanel.IsVisible = true;
-                        break;                    case "Storage":
-                        if (_storagePanel != null) 
+            // Use the selected index instead of content to avoid translation issues
+            int selectedIndex = listBox.SelectedIndex;
+            
+            // Hide all panels first
+            if (_generalPanel != null) _generalPanel.IsVisible = false;
+            if (_appearancePanel != null) _appearancePanel.IsVisible = false;
+            if (_storagePanel != null) _storagePanel.IsVisible = false;
+            if (_updatesPanel != null) _updatesPanel.IsVisible = false;
+            if (_legalPanel != null) _legalPanel.IsVisible = false;
+            if (_creditPanel != null) _creditPanel.IsVisible = false;
+            
+            // Show the selected panel based on index
+            switch (selectedIndex)
+            {
+                case 0: // General
+                    if (_generalPanel != null) _generalPanel.IsVisible = true;
+                    break;
+                case 1: // Appearance  
+                    if (_appearancePanel != null) _appearancePanel.IsVisible = true;
+                    break;
+                case 2: // Storage
+                    if (_storagePanel != null) 
+                    {
+                        _storagePanel.IsVisible = true;
+                        // Automatically calculate storage usage when panel is selected
+                        if (DataContext is OptionsViewModel viewModel)
                         {
-                            _storagePanel.IsVisible = true;
-                            // Automatically calculate storage usage when panel is selected
-                            if (DataContext is OptionsViewModel viewModel)
-                            {
-                                _ = viewModel.CalculateStorageUsageCommand.ExecuteAsync(null);
-                            }
+                            _ = viewModel.CalculateStorageUsageCommand.ExecuteAsync(null);
                         }
-                        break;
-                    case "Updates":
-                        if (_updatesPanel != null) 
+                    }
+                    break;
+                case 3: // Updates
+                    if (_updatesPanel != null) 
+                    {
+                        _updatesPanel.IsVisible = true;
+                        // Refresh the update status when panel is selected
+                        if (DataContext is OptionsViewModel viewModel)
                         {
-                            _updatesPanel.IsVisible = true;
-                            // Refresh the update status when panel is selected
-                            if (DataContext is OptionsViewModel viewModel)
-                            {
-                                ((ReactiveUI.IReactiveObject)viewModel).RaisePropertyChanged(
-                                    new System.ComponentModel.PropertyChangedEventArgs(nameof(OptionsViewModel.LastUpdateCheck))
-                                );
-                            }                        }
-                        break;                    case "Legal":
-                        if (_legalPanel != null) 
-                        {
-                            _legalPanel.IsVisible = true;
-                            // Load Terms of Service by default when Legal panel is opened
-                            LoadLegalDocument("TermsOfService");
-                            // Update the legal acceptance date to current date when the user views the legal documents
-                            if (DataContext is OptionsViewModel viewModel)
-                            {
-                                viewModel.UpdateLegalAcceptanceDate();
-                            }
+                            ((ReactiveUI.IReactiveObject)viewModel).RaisePropertyChanged(
+                                new System.ComponentModel.PropertyChangedEventArgs(nameof(OptionsViewModel.LastUpdateCheck))
+                            );
                         }
-                        break;
-                    case "Credit":
-                        if (_creditPanel != null) _creditPanel.IsVisible = true;
-                        break;
-                }
+                    }
+                    break;
+                case 4: // Legal
+                    if (_legalPanel != null) 
+                    {
+                        _legalPanel.IsVisible = true;
+                        // Load Terms of Service by default when Legal panel is opened
+                        LoadLegalDocument("TermsOfService");
+                        // Update the legal acceptance date to current date when the user views the legal documents
+                        if (DataContext is OptionsViewModel viewModel)
+                        {
+                            viewModel.UpdateLegalAcceptanceDate();
+                        }
+                    }
+                    break;
+                case 5: // Credit
+                    if (_creditPanel != null) _creditPanel.IsVisible = true;
+                    break;
             }
         }
     }
@@ -234,8 +248,7 @@ public partial class OptionsWindow : Window
         SaveWindowPosition();
         this.Close();
     }
-    
-    // Save window position and size before closing
+      // Save window position and size before closing
     private void SaveWindowPosition()
     {
         var settings = Settings.Instance;
@@ -252,7 +265,7 @@ public partial class OptionsWindow : Window
             
             // Always save maximized state
             settings.IsOptionsMaximized = WindowState == WindowState.Maximized;
-            settings.Save();
+            settings.ForceSave(); // Use ForceSave for reliability
         }
     }
 
@@ -403,21 +416,74 @@ public partial class OptionsWindow : Window
                 }
             }
         }
-    }
+    }    private bool _isClosingFromRestart = false;
 
-    protected override void OnClosing(WindowClosingEventArgs e)
+    protected override async void OnClosing(WindowClosingEventArgs e)
     {
-        base.OnClosing(e);
-        
-        var settings = Settings.Instance;
-        if (settings != null && WindowState != WindowState.Maximized)
+        // If we're already in the process of closing from restart, don't interfere
+        if (_isClosingFromRestart)
         {
-            settings.OptionsWindowWidth = Width;
-            settings.OptionsWindowHeight = Height;
-            settings.OptionsWindowPositionX = Position.X;
-            settings.OptionsWindowPositionY = Position.Y;            settings.ForceSave(); // Use ForceSave for reliability
+            SaveWindowPosition();
+            base.OnClosing(e);
+            return;
         }
-    }    private void LoadLegalDocument(string documentType)
+
+        // Check if language was changed and handle restart prompt
+        if (DataContext is OptionsViewModel viewModel && viewModel.LanguageChanged)
+        {
+            // Cancel the close to handle restart prompt first
+            e.Cancel = true;
+            
+            try
+            {
+                // Show restart prompt
+                bool shouldRestart = await RestartPromptService.Instance.ShowLanguageChangeRestartPromptAsync(this);
+                
+                if (shouldRestart)
+                {
+                    // User chose to restart - save settings and restart
+                    SaveWindowPosition();
+                    
+                    // Set flag to prevent re-entry and restart the application
+                    _isClosingFromRestart = true;
+                    bool restartSuccessful = await RestartPromptService.Instance.RestartApplicationAsync();
+                    
+                    if (!restartSuccessful)
+                    {
+                        // If restart failed, still close the window but log the error
+                        LoggingService.Instance?.Error("Failed to restart application after language change");
+                        _isClosingFromRestart = true;
+                        Close();
+                    }
+                    // If restart successful, the app will close automatically
+                }
+                else
+                {
+                    // User chose "Not Now" - reset the language changed flag and close normally
+                    viewModel.ResetLanguageChangeFlag();
+                    _isClosingFromRestart = true;
+                    Close();
+                }
+            }
+            catch (Exception ex)
+            {
+                LoggingService.Instance?.Error($"Error handling language change restart prompt: {ex.Message}");
+                // If something goes wrong, reset flag and close normally
+                if (DataContext is OptionsViewModel vm)
+                {
+                    vm.ResetLanguageChangeFlag();
+                }
+                _isClosingFromRestart = true;
+                Close();
+            }
+        }
+        else
+        {
+            // No language change, close normally
+            SaveWindowPosition();
+            base.OnClosing(e);
+        }
+    }private void LoadLegalDocument(string documentType)
     {
         if (DataContext is OptionsViewModel viewModel)
         {

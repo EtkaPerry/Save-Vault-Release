@@ -60,6 +60,15 @@ public partial class OptionsViewModel : ViewModelBase
 {
     private readonly Settings _settings;
     private readonly Action _onSettingsChanged;
+    private readonly string _initialLanguage; // Track initial language for restart prompt
+
+    // Language change tracking
+    private bool _languageChanged = false;
+    public bool LanguageChanged 
+    { 
+        get => _languageChanged; 
+        private set => this.RaiseAndSetIfChanged(ref _languageChanged, value);
+    }
 
     private int _autoSaveInterval;
     public int AutoSaveInterval
@@ -149,9 +158,51 @@ public partial class OptionsViewModel : ViewModelBase
             }
         }
     }
-    
-    // List of available themes for the ComboBox
-    public List<string> AvailableThemes { get; } = new List<string> { "System", "Light", "Dark" };
+      // List of available themes for the ComboBox
+    private ObservableCollection<string> _availableThemes = new();
+    public ObservableCollection<string> AvailableThemes
+    {
+        get => _availableThemes;
+        set => this.RaiseAndSetIfChanged(ref _availableThemes, value);
+    }
+
+    // Maps a theme display-name shown in the dropdown to the theme extension that provides it
+    private readonly Dictionary<string, Extension> _themeExtensions = new();    // Language properties
+    private string _selectedLanguage = string.Empty;
+    public string SelectedLanguage
+    {
+        get => _selectedLanguage;
+        set
+        {
+            if (_selectedLanguage != value)
+            {
+                this.RaiseAndSetIfChanged(ref _selectedLanguage, value);
+                
+                // Check if language actually changed from initial value
+                if (value != _initialLanguage)
+                {
+                    LanguageChanged = true;
+                }
+                
+                // Get language code from display name
+                var languageCode = LanguageManager.Instance.GetLanguageCodeByDisplayName(value);
+                if (!string.IsNullOrEmpty(languageCode))
+                {
+                    LanguageManager.Instance.SetCurrentLanguage(languageCode);
+                    _settings.Language = languageCode;
+                    SaveChanges();
+                }
+            }
+        }
+    }
+
+    // List of available languages for the ComboBox
+    private ObservableCollection<string> _availableLanguages = new();
+    public ObservableCollection<string> AvailableLanguages 
+    { 
+        get => _availableLanguages; 
+        set => this.RaiseAndSetIfChanged(ref _availableLanguages, value);
+    }
 
     private string _backupStorageLocation;
     public string BackupStorageLocation
@@ -194,6 +245,9 @@ public partial class OptionsViewModel : ViewModelBase
         }
         
         _onSettingsChanged = onSettingsChanged;
+        
+        // Store initial language to track changes
+        _initialLanguage = LanguageManager.Instance.GetCurrentLanguageDisplayName();
 
         // Load current settings from the instance
         _autoSaveInterval = _settings.AutoSaveInterval;
@@ -202,18 +256,44 @@ public partial class OptionsViewModel : ViewModelBase
         _changeDetectionEnabled = _settings.ChangeDetectionEnabled;
         _maxAutoSaves = _settings.MaxAutoSaves;        _maxStartSaves = _settings.MaxStartSaves;
         _selectedTheme = _settings.Theme ?? "System";
-        _backupStorageLocation = _settings.BackupStorageLocation;
-        
-        // Load update settings
+        _backupStorageLocation = _settings.BackupStorageLocation;        // Load update settings
         _autoCheckUpdates = _settings.AutoCheckUpdates;
         _updateCheckInterval = _settings.UpdateCheckInterval;
 
-        Debug.WriteLine($"OptionsViewModel initialized with settings. AutoSaveInterval={_autoSaveInterval}, GlobalAutoSaveEnabled={_globalAutoSaveEnabled}");
+        // Load available themes
+        LoadAvailableThemes();
+          // Load available languages from LanguageManager
+        LoadAvailableLanguages();
         
-        // Set up update service events
+        // Make sure we have the correct current language selection
+        var actualCurrentLanguage = LanguageManager.Instance.GetCurrentLanguageDisplayName();
+        if (_selectedLanguage != actualCurrentLanguage)
+        {
+            _selectedLanguage = actualCurrentLanguage;
+            this.RaisePropertyChanged(nameof(SelectedLanguage));
+        }
+
+        Debug.WriteLine($"OptionsViewModel initialized with settings. AutoSaveInterval={_autoSaveInterval}, GlobalAutoSaveEnabled={_globalAutoSaveEnabled}");        // Set up update service events
         var updateService = UpdateService.Instance;
         updateService.UpdateStatusChanged += (s, status) => UpdateStatus = status;
         updateService.UpdateAvailabilityChanged += (s, available) => UpdateAvailable = available;
+        
+        // Subscribe to language registration events
+        LanguageManager.Instance.LanguageChanged += OnLanguageChanged;
+        LanguageManager.Instance.LanguageRegistered += (s, languageInfo) => RefreshAvailableLanguages();
+        LanguageManager.Instance.LanguageUnregistered += (s, languageInfo) => RefreshAvailableLanguages();        // Subscribe to extension events to refresh languages when extensions are enabled/disabled
+        ExtensionService.Instance.ExtensionEnabled += (s, extension) => {
+            RefreshAvailableLanguages();
+            RefreshAvailableThemes();
+        };
+        ExtensionService.Instance.ExtensionDisabled += (s, extension) => {
+            RefreshAvailableLanguages();
+            RefreshAvailableThemes();
+        };
+        ExtensionService.Instance.ExtensionUninstalled += (s, extension) => {
+            RefreshAvailableLanguages();
+            RefreshAvailableThemes();
+        };
         
         // Update status from service
         UpdateAvailable = updateService.UpdateAvailable;
@@ -236,21 +316,40 @@ public partial class OptionsViewModel : ViewModelBase
         // Update the main view model with the new settings
         _onSettingsChanged?.Invoke();
         Debug.WriteLine("MainViewModel updated via callback");
-    }
-    
-    private void ApplyTheme(string themeName)
+    }    private void ApplyTheme(string themeName)
     {
         var app = Avalonia.Application.Current;
         if (app == null) return;
 
-        ThemeVariant theme = themeName switch
+        var settings = Settings.Instance;
+
+        // Built-in themes take precedence over any extension that might share their name
+        bool isBuiltIn = themeName is "System" or "Light" or "Dark";
+
+        // Always revert any previous extension theme overrides first, so the built-in
+        // ThemeDictionary (or the next theme) starts from a clean slate.
+        LuaEngine.Instance.ClearThemeOverrides();
+
+        if (!isBuiltIn && _themeExtensions.TryGetValue(themeName, out var themeExtension))
         {
-            "Dark" => ThemeVariant.Dark,
-            "Light" => ThemeVariant.Light,
-            _ => ThemeVariant.Default // System
-        };
-        
-        app.RequestedThemeVariant = theme;
+            // A theme provided by an extension. Custom themes sit on the Dark base variant
+            // so that built-in (Fluent) controls match their typically-dark backgrounds.
+            app.RequestedThemeVariant = ThemeVariant.Dark;
+            LuaEngine.Instance.ApplyThemeExtension(themeExtension);
+            settings.SetExtensionSetting("app.theme.selected", themeExtension.Id);
+        }
+        else
+        {
+            app.RequestedThemeVariant = themeName switch
+            {
+                "Dark" => ThemeVariant.Dark,
+                "Light" => ThemeVariant.Light,
+                _ => ThemeVariant.Default // System
+            };
+
+            // No extension theme active anymore
+            settings.SetExtensionSetting("app.theme.selected", "");
+        }
     }
 
     // Keep this for backward compatibility or direct saving if needed
@@ -576,4 +675,123 @@ public partial class OptionsViewModel : ViewModelBase
         _settings.LegalAcceptanceDate = DateTime.Now;
         SaveChanges();
         this.RaisePropertyChanged(nameof(LegalAcceptanceDate));
-    }}
+    }    private void LoadAvailableThemes()
+    {
+        try
+        {
+            // Clear existing themes
+            AvailableThemes.Clear();
+            _themeExtensions.Clear();
+
+            // Built-in themes
+            AvailableThemes.Add("System");
+            AvailableThemes.Add("Light");
+            AvailableThemes.Add("Dark");
+
+            // Themes provided by enabled theming extensions
+            foreach (var ext in ExtensionService.Instance.GetInstalledExtensions())
+            {
+                if (ext.Category != ExtensionCategory.Theming || !ext.IsEnabled)
+                    continue;
+
+                var displayName = ext.Name;
+                if (string.IsNullOrWhiteSpace(displayName) || AvailableThemes.Contains(displayName))
+                    continue; // avoid clashing with the built-in entries
+
+                AvailableThemes.Add(displayName);
+                _themeExtensions[displayName] = ext;
+            }
+
+            Debug.WriteLine($"Loaded {AvailableThemes.Count} themes ({_themeExtensions.Count} from extensions)");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Failed to load available themes: {ex.Message}");
+        }
+    }    public void RefreshAvailableThemes()
+    {
+        LoadAvailableThemes();
+        
+        // Ensure selected theme is valid (only built-in themes)
+        if (!AvailableThemes.Contains(SelectedTheme))
+        {
+            SelectedTheme = "System";
+            Debug.WriteLine("Reverted to System theme as current selection is no longer valid");
+        }
+    }
+
+    private void LoadAvailableLanguages()
+    {
+        try
+        {
+            AvailableLanguages.Clear();
+            
+            // Get languages from LanguageManager
+            var availableLanguages = LanguageManager.Instance.GetLanguageDisplayNames();
+            foreach (var language in availableLanguages)
+            {
+                AvailableLanguages.Add(language);
+                Debug.WriteLine($"Added language to options: {language}");
+            }
+            
+            // Set current selection
+            _selectedLanguage = LanguageManager.Instance.GetCurrentLanguageDisplayName();
+            this.RaisePropertyChanged(nameof(SelectedLanguage));
+            
+            Debug.WriteLine($"Loaded {AvailableLanguages.Count} languages in options. Current: {_selectedLanguage}");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Failed to load available languages: {ex.Message}");
+        }
+    }    public void RefreshAvailableLanguages()
+    {
+        var currentSelection = SelectedLanguage;
+        LoadAvailableLanguages();
+        
+        // Check if we need to update the selection to match the actual current language
+        var actualCurrentLanguage = LanguageManager.Instance.GetCurrentLanguageDisplayName();
+        if (SelectedLanguage != actualCurrentLanguage)
+        {
+            Debug.WriteLine($"Updating language selection from '{SelectedLanguage}' to '{actualCurrentLanguage}' to match actual current language");
+            _selectedLanguage = actualCurrentLanguage;
+            this.RaisePropertyChanged(nameof(SelectedLanguage));
+        }
+        
+        // Check if the previously selected language is no longer available
+        if (!string.IsNullOrEmpty(currentSelection) && !AvailableLanguages.Contains(currentSelection))
+        {
+            // Current language is no longer available (extension disabled), revert to English
+            Debug.WriteLine($"Current language '{currentSelection}' is no longer available, reverting to English");
+            SelectedLanguage = "English";
+        }
+    }
+
+    private void OnLanguageChanged(object? sender, string languageCode)
+    {
+        // Update the selected language in the UI when language is changed programmatically
+        try
+        {
+            var displayName = LanguageManager.Instance.GetCurrentLanguageDisplayName();
+            
+            if (SelectedLanguage != displayName)
+            {
+                _selectedLanguage = displayName;
+                this.RaisePropertyChanged(nameof(SelectedLanguage));
+                Debug.WriteLine($"UI updated to show language: {displayName} ({languageCode})");
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Error updating language in UI: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Reset the language changed flag (used when user chooses not to restart)
+    /// </summary>
+    public void ResetLanguageChangeFlag()
+    {
+        LanguageChanged = false;
+    }
+}

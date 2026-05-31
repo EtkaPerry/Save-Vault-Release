@@ -55,6 +55,22 @@ function generateJWT($userId, $username, $issuedAt, $expire, $isAdmin = false) {
 }
 
 /**
+ * JWT Helper Class
+ */
+class JWT {
+    /**
+     * Decode a JWT token
+     * 
+     * @param string $token JWT token to decode
+     * @param bool $allowExpired Whether to allow expired tokens (default: false)
+     * @return object|false Decoded payload object or false if invalid
+     */
+    public static function decode($token, $allowExpired = false) {
+        return validateJWT($token, $allowExpired);
+    }
+}
+
+/**
  * Validate a JWT token
  * 
  * @param string $token JWT token to validate

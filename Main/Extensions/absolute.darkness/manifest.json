@@ -1,0 +1,14 @@
+{
+  "id": "absolute.darkness",
+  "name": "Absolute Darkness",
+  "version": "1.0.0",
+  "description": "A theme darker than the void itself. For those who find dark mode too bright.",
+  "author": "SaveVault Team",
+  "category": "Theming",
+  "main": "main.lua",
+  "isOfficial": true,
+  "minimumVersion": "0.2.8",
+  "tags": ["theme", "dark", "black", "amoled"],
+  "createdDate": "2025-11-28T00:00:00Z",
+  "updatedDate": "2025-11-28T00:00:00Z"
+}

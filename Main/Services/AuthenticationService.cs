@@ -6,11 +6,10 @@ using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace SaveVaultApp.Services
-{
-    public class AuthenticationService
+{    public class AuthenticationService
     {
         private readonly HttpClient _client;
-        private readonly string _baseUrl = "https://vault.etka.co.uk/api"; // Your API URL
+        private readonly string _baseUrl = "https://etka.helioho.st/api"; // Your API URL
         private readonly LoggingService _logger = LoggingService.Instance;
         
         public AuthenticationService()

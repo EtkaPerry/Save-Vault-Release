@@ -53,7 +53,7 @@ namespace SaveVaultApp.Services
         
         private readonly Settings _settings;
         private readonly HttpClient _httpClient;
-        private readonly string _notificationsUrl = "https://vault.etka.co.uk/notifications_api.php";
+        private readonly string _notificationsUrl = "https://etka.helioho.st/notifications_api.php";
         private readonly string _storageFolder;
         private readonly string _notificationsFile = "notifications.json";
         
@@ -227,22 +227,14 @@ namespace SaveVaultApp.Services
                 return newNotificationsAdded;
             }            catch (Exception ex)
             {
-                LoggingService.Instance.Error($"Error checking for notifications: {ex.Message}");
+                LoggingService.Instance.Error($"Error checking notifications: {ex.Message}");
                 UpdateStatus($"Error: {ex.Message}");
-                
-                // Try to load from local storage as fallback
-                LoadNotificationsFromLocalStorage();
-                
-                // Add a local notification about the error
-                AddLocalNotification(
-                    $"Failed to check for new notifications: {ex.Message}",
-                    "warning"
-                );
-                
                 IsChecking = false;
                 return false;
             }
-        }        /// <summary>
+        }
+
+        /// <summary>
         /// Gets all notifications sorted by date (newest first)
         /// </summary>
         public List<Notification> GetNotifications()

@@ -79,6 +79,7 @@ public partial class MainWindow : Window
         var dragRegion = this.FindControl<Control>("DragRegion");
         var optionsMenuItem = this.FindControl<MenuItem>("OptionsMenuItem");
         var logoSettingsMenuItem = this.FindControl<MenuItem>("LogoSettingsMenuItem");
+        var extensionsMenuItem = this.FindControl<MenuItem>("ExtensionsMenuItem");
         var logoButton = this.FindControl<Button>("LogoButton");
         var homeSection = this.FindControl<Grid>("HomeSection");
         
@@ -98,7 +99,7 @@ public partial class MainWindow : Window
                         {
                             if (item is MenuItem menuItem)
                             {
-                                menuItem.MinWidth = homeSectionWidth;
+                                menuItem.Width = homeSectionWidth;
                             }
                         }
                     };
@@ -131,6 +132,12 @@ public partial class MainWindow : Window
         if (logoSettingsMenuItem != null)
         {
             logoSettingsMenuItem.Click += OptionsMenuItem_Click;
+        }
+
+        // Set up extensions menu item click
+        if (extensionsMenuItem != null)
+        {
+            extensionsMenuItem.Click += ExtensionsMenuItem_Click;
         }
 
         // Subscribe to window state changes
@@ -356,8 +363,7 @@ public partial class MainWindow : Window
     {
         BeginMoveDrag(e);
     }
-    
-    private void OptionsMenuItem_Click(object? sender, RoutedEventArgs e)
+      private void OptionsMenuItem_Click(object? sender, RoutedEventArgs e)
     {
         var optionsWindow = new OptionsWindow();
         
@@ -367,7 +373,34 @@ public partial class MainWindow : Window
             optionsWindow.SetMainViewModel(viewModel);
         }
         
+        // Register the options window with UITranslationService for translations
+        try
+        {
+            Services.UITranslationService.Instance.TrackNewWindow(optionsWindow);
+            LoggingService.Instance.Info("Registered OptionsWindow with UITranslationService for translations");
+        }
+        catch (Exception ex)
+        {
+            LoggingService.Instance.Warning($"Failed to register OptionsWindow with UITranslationService: {ex.Message}");
+        }
+        
         optionsWindow.ShowDialog(this);
+    }    private void ExtensionsMenuItem_Click(object? sender, RoutedEventArgs e)
+    {
+        var extensionWindow = new ExtensionWindow();
+        
+        // Register the extension window with UITranslationService for translations
+        try
+        {
+            Services.UITranslationService.Instance.TrackNewWindow(extensionWindow);
+            LoggingService.Instance.Info("Registered ExtensionWindow with UITranslationService for translations");
+        }
+        catch (Exception ex)
+        {
+            LoggingService.Instance.Warning($"Failed to register ExtensionWindow with UITranslationService: {ex.Message}");
+        }
+        
+        extensionWindow.ShowDialog(this);
     }
 
     private void OnNameEditKeyDown(object? sender, KeyEventArgs e)
@@ -444,8 +477,7 @@ public partial class MainWindow : Window
             _logViewer.Hide();
         }
     }
-    
-    private void ShowLogViewer()
+      private void ShowLogViewer()
     {
         if (_logViewer == null)
         {
@@ -455,6 +487,17 @@ public partial class MainWindow : Window
                 Width = 900,
                 Height = 500
             };
+            
+            // Register the log viewer window with UITranslationService for translations
+            try
+            {
+                Services.UITranslationService.Instance.TrackNewWindow(_logViewer);
+                LoggingService.Instance.Info("Registered LogViewerWindow with UITranslationService for translations");
+            }
+            catch (Exception ex)
+            {
+                LoggingService.Instance.Warning($"Failed to register LogViewerWindow with UITranslationService: {ex.Message}");
+            }
             
             // When closed, set to null so we recreate it next time
             _logViewer.Closed += (s, e) => _logViewer = null;

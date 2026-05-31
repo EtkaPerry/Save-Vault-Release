@@ -54,10 +54,9 @@ namespace SaveVaultApp.Services
             CurrentVersion = versionAttribute != null ? 
                 new Version(versionAttribute.Version) : 
                 new Version(1, 0, 0);
-                
-            // Determine platform
+                  // Determine platform
             _platform = GetCurrentPlatform();
-            _updateUrl = $"https://vault.etka.co.uk/download/{_platform}/version.json";
+            _updateUrl = $"https://etka.helioho.st/download/{_platform}/version.json";
             
             LoggingService.Instance.Info($"Current version: {CurrentVersion} on platform: {_platform}");
         }
@@ -197,7 +196,7 @@ namespace SaveVaultApp.Services
                         "macos" => "SaveVault",
                         _ => "Save%20Vault.exe"
                     };
-                    downloadUrl = $"https://vault.etka.co.uk/download/{platform}/{fileName}";
+                    downloadUrl = $"https://etka.helioho.st/download/{platform}/{fileName}";
                     LoggingService.Instance.Warning($"Using default download URL for {platform}: {downloadUrl}");
                 }
                 

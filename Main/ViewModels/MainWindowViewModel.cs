@@ -604,14 +604,44 @@ public partial class MainWindowViewModel : ViewModelBase
             // Create timestamp folder for this specific backup
             string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
             string backupFolder = Path.Combine(appBackupFolder, timestamp);
+
+            // Don't start a backup we can't finish: bail out if the destination
+            // drive is short on space (a backup tool must never fill the disk).
+            if (!Utilities.BackupManager.HasEnoughFreeSpace(app.SavePath, appBackupFolder, out long requiredBytes))
+            {
+                Services.LoggingService.Instance?.Warning(
+                    $"Skipped auto-save for '{app.Name}': not enough free space (need ~{Utilities.BackupManager.FormatBytes(requiredBytes)}).");
+                if (SelectedApp == app)
+                    StatusMessage = $"Auto-save skipped for '{app.Name}': low disk space.";
+                return;
+            }
+
             Directory.CreateDirectory(backupFolder);
-            
+
             // Count actual files copied
             int filesCopied = 0;
-            
+            var copyErrors = new List<string>();
+
             // Copy all files from the save directory to the backup folder
-            CopyDirectory(app.SavePath, backupFolder, ref filesCopied);
-            
+            CopyDirectory(app.SavePath, backupFolder, ref filesCopied, copyErrors);
+
+            // Nothing usable copied: remove the empty folder we created so it
+            // doesn't linger as a misleading "backup" with no contents.
+            if (filesCopied == 0)
+            {
+                try { Directory.Delete(backupFolder, true); } catch { /* best effort */ }
+                if (copyErrors.Count > 0)
+                    Services.LoggingService.Instance?.Warning(
+                        $"Auto-save for '{app.Name}' produced no files ({copyErrors.Count} error(s)); skipped.");
+                return;
+            }
+
+            // A partial backup is still worth keeping, but the user should be told
+            // it isn't complete (files are often locked while a game is running).
+            if (copyErrors.Count > 0)
+                Services.LoggingService.Instance?.Warning(
+                    $"Auto-save for '{app.Name}' was incomplete: {copyErrors.Count} file(s) couldn't be copied (likely locked by the game).");
+
             // Only create a backup entry if files were actually copied
             if (filesCopied > 0)
             {
@@ -694,36 +724,19 @@ public partial class MainWindowViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Error creating backup for {app.Name}: {ex.Message}");
+            Services.LoggingService.Instance?.Error($"Error creating backup for '{app.Name}': {ex.Message}");
         }
     }
-    
-    private void CopyDirectory(string sourceDir, string destDir, ref int filesCopied)
+
+    // Thin wrapper kept for the existing call sites. Delegates to the resilient
+    // BackupManager.CopyDirectory so a single locked/unreadable file can no longer
+    // abort an entire backup. Pass an optional list to learn which files failed.
+    private void CopyDirectory(string sourceDir, string destDir, ref int filesCopied, List<string>? errors = null)
     {
-        // Get the subdirectories for the specified directory
-        var dir = new DirectoryInfo(sourceDir);
-        
-        // Skip if directory doesn't exist
-        if (!dir.Exists)
-            return;
-            
-        // Create all subdirectories
-        DirectoryInfo[] dirs = dir.GetDirectories();
-        foreach (DirectoryInfo subdir in dirs)
-        {
-            string newDestinationDir = Path.Combine(destDir, subdir.Name);
-            CopyDirectory(subdir.FullName, newDestinationDir, ref filesCopied);
-        }
-        
-        // Copy all files
-        FileInfo[] files = dir.GetFiles();
-        foreach (FileInfo file in files)
-        {
-            string tempPath = Path.Combine(destDir, file.Name);
-            Directory.CreateDirectory(destDir); // Ensure destination directory exists
-            file.CopyTo(tempPath, true);
-            filesCopied++;
-        }
+        var result = Utilities.BackupManager.CopyDirectory(sourceDir, destDir);
+        filesCopied += result.FilesCopied;
+        if (errors != null && result.Errors.Count > 0)
+            errors.AddRange(result.Errors);
     }
       private string SanitizePathName(string name)
     {
@@ -861,13 +874,24 @@ public partial class MainWindowViewModel : ViewModelBase
                 string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
                 string backupFolder = Path.Combine(appBackupFolder, timestamp);
                 Directory.CreateDirectory(backupFolder);
-                
+
                 // Count actual files copied
                 int filesCopied = 0;
-                
+                var copyErrors = new List<string>();
+
                 // Copy all files from the save directory to the backup folder
-                CopyDirectory(SelectedApp.SavePath, backupFolder, ref filesCopied);
-                
+                CopyDirectory(SelectedApp.SavePath, backupFolder, ref filesCopied, copyErrors);
+
+                if (copyErrors.Count > 0)
+                    Services.LoggingService.Instance?.Warning(
+                        $"Start-save for '{SelectedApp.Name}' was incomplete: {copyErrors.Count} file(s) couldn't be copied.");
+
+                // Remove the empty folder if nothing was captured (don't leave a hollow "backup").
+                if (filesCopied == 0)
+                {
+                    try { Directory.Delete(backupFolder, true); } catch { /* best effort */ }
+                }
+
                 // Only create a backup entry if files were actually copied
                 if (filesCopied > 0)
                 {
@@ -2628,10 +2652,13 @@ public partial class MainWindowViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void RestoreBackup(SaveBackupInfo backup)
+    private async Task RestoreBackup(SaveBackupInfo backup)
     {
         if (SelectedApp == null || backup == null)
             return;
+
+        var app = SelectedApp;
+        var logger = Services.LoggingService.Instance;
 
         try
         {
@@ -2641,79 +2668,163 @@ public partial class MainWindowViewModel : ViewModelBase
                 return;
             }
 
-            if (!Directory.Exists(SelectedApp.SavePath))
+            if (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown" || !Directory.Exists(app.SavePath))
             {
                 StatusMessage = "Save folder not found!";
                 return;
             }
 
-            // Create a backup of current save first
-            string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-            string currentBackupFolder = Path.Combine(_backupRootFolder, SanitizePathName(SelectedApp.Name), timestamp);
-            Directory.CreateDirectory(currentBackupFolder);
+            // Restoring overwrites the live save, so always confirm first.
+            string message =
+                $"This will replace the current save for '{app.Name}' with the backup from {backup.Timestamp:g}.\n\n" +
+                "A safety backup of the current save is made first, so you can undo this.";
+            if (app.IsRunning)
+                message += "\n\n⚠ This game looks like it's running. Close it before restoring to avoid conflicts.";
 
-            int filesCopied = 0;
-            CopyDirectory(SelectedApp.SavePath, currentBackupFolder, ref filesCopied);
-
-            if (filesCopied > 0)
+            bool confirmed = await Utilities.DialogHelper.ShowConfirmationAsync(
+                _mainWindow, "Restore Backup", message, "Restore", "Cancel");
+            if (!confirmed)
             {
-                var currentBackupInfo = new SaveBackupInfo
-                {
-                    BackupPath = currentBackupFolder,
-                    Timestamp = DateTime.Now,
-                    Description = "Automatic backup before restore",
-                    IsAutoBackup = false
-                };
-                SelectedApp.BackupHistory.Add(currentBackupInfo);
+                StatusMessage = "Restore cancelled.";
+                return;
             }
 
-            // Now restore the selected backup
-            DirectoryInfo saveDirInfo = new DirectoryInfo(SelectedApp.SavePath);
-            
-            // Delete all files in save directory
-            foreach (FileInfo file in saveDirInfo.GetFiles())
-            {
-                try
-                {
-                    file.Delete();
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Error deleting file {file.Name}: {ex.Message}");
-                }
-            }
-            
-            // Delete all subdirectories
-            foreach (DirectoryInfo dir in saveDirInfo.GetDirectories())
-            {
-               
-                try
-                {
-                    dir.Delete(true);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Error deleting directory {dir.Name}: {ex.Message}");
-                }
-            }
-
-            // Copy backup files to save directory
-            filesCopied = 0;
-            CopyDirectory(backup.BackupPath, SelectedApp.SavePath, ref filesCopied);
-
-            StatusMessage = $"Restored save from {backup.Description}";
+            PerformRestore(app, backup);
         }
         catch (Exception ex)
         {
             StatusMessage = $"Error restoring backup: {ex.Message}";
-            Debug.WriteLine($"Error restoring backup: {ex.Message}");
+            logger.Error($"Error restoring backup for '{app.Name}': {ex.Message}");
         }
     }
 
+    /// <summary>
+    /// Safely replaces an app's live save with a chosen backup. The live save is
+    /// never deleted until a verified, persisted safety backup exists, and any
+    /// failure rolls the live save back to that safety copy.
+    /// </summary>
+    private void PerformRestore(ApplicationInfo app, SaveBackupInfo backup)
+    {
+        var logger = Services.LoggingService.Instance;
+        string savePath = app.SavePath;
+
+        // 1. Make a safety backup of the CURRENT save before touching anything.
+        string safetyFolder = Path.Combine(
+            _backupRootFolder,
+            SanitizePathName(app.Name),
+            DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss") + "_pre-restore");
+        Directory.CreateDirectory(safetyFolder);
+
+        var safetyCopy = Utilities.BackupManager.CopyDirectory(savePath, safetyFolder);
+
+        // If the live save has content but none of it could be copied, refuse to
+        // proceed: without a safety backup we cannot guarantee a rollback.
+        if (Utilities.BackupManager.DirectoryHasFiles(savePath) && safetyCopy.FilesCopied == 0)
+        {
+            try { Directory.Delete(safetyFolder, true); } catch { /* best effort */ }
+            logger.Error($"Restore aborted for '{app.Name}': could not safeguard the current save (files may be locked).");
+            StatusMessage = "Restore aborted: couldn't safeguard the current save. Close the game and try again.";
+            return;
+        }
+
+        // Persist the safety backup so it shows up in history and survives a restart.
+        RegisterBackup(app, safetyFolder, $"Before restore ({DateTime.Now:yyyy-MM-dd HH-mm-ss})", isAutoBackup: false);
+
+        // 2. Make sure there is room for the restored files.
+        if (!Utilities.BackupManager.HasEnoughFreeSpace(backup.BackupPath, savePath, out long required))
+        {
+            logger.Error($"Restore aborted for '{app.Name}': not enough free space (need ~{Utilities.BackupManager.FormatBytes(required)}).");
+            StatusMessage = $"Restore aborted: not enough free disk space (need ~{Utilities.BackupManager.FormatBytes(required)}).";
+            return;
+        }
+
+        // 3. Clear the live save. If this fails, roll back from the safety copy.
+        try
+        {
+            Utilities.BackupManager.ClearDirectoryContents(savePath, throwOnError: true);
+        }
+        catch (Exception ex)
+        {
+            logger.Error($"Restore: failed clearing save for '{app.Name}': {ex.Message}. Rolling back.");
+            RollbackFromSafety(savePath, safetyFolder, logger);
+            StatusMessage = "Restore failed while clearing the old save; your original save was kept.";
+            return;
+        }
+
+        // 4. Copy the chosen backup into the live save directory.
+        var restore = Utilities.BackupManager.CopyDirectory(backup.BackupPath, savePath);
+        if (!restore.IsComplete)
+        {
+            logger.Error($"Restore of '{app.Name}' incomplete ({restore.Errors.Count} file(s) failed). Rolling back to pre-restore save.");
+            RollbackFromSafety(savePath, safetyFolder, logger);
+            StatusMessage = $"Restore failed ({restore.Errors.Count} file(s) couldn't be written); your original save was kept.";
+            return;
+        }
+
+        logger.Info($"Restored '{app.Name}' from backup {backup.Timestamp:g} ({restore.FilesCopied} file(s)).");
+        StatusMessage = $"Restored save from {backup.Description}";
+    }
+
+    /// <summary>Restores the live save from the pre-restore safety copy after a failed restore.</summary>
+    private void RollbackFromSafety(string savePath, string safetyFolder, Services.LoggingService logger)
+    {
+        try
+        {
+            Utilities.BackupManager.ClearDirectoryContents(savePath, throwOnError: false);
+            var rolledBack = Utilities.BackupManager.CopyDirectory(safetyFolder, savePath);
+            logger.Info($"Rolled back save to pre-restore state ({rolledBack.FilesCopied} file(s)).");
+        }
+        catch (Exception ex)
+        {
+            logger.Critical($"Rollback FAILED for '{savePath}': {ex.Message}. The safety copy is preserved at: {safetyFolder}");
+        }
+    }
+
+    /// <summary>
+    /// Records a completed backup folder in both the in-memory history (for the UI)
+    /// and the persisted settings. Must be called on the UI thread.
+    /// </summary>
+    private void RegisterBackup(ApplicationInfo app, string backupFolder, string description, bool isAutoBackup)
+    {
+        var timestamp = DateTime.Now;
+
+        app.BackupHistory.Insert(0, new ViewModels.SaveBackupInfo
+        {
+            BackupPath = backupFolder,
+            Timestamp = timestamp,
+            Description = description,
+            IsAutoBackup = isAutoBackup
+        });
+
+        if (!_settings.BackupHistory.ContainsKey(app.ExecutablePath))
+            _settings.BackupHistory[app.ExecutablePath] = new List<Models.SaveBackupInfo>();
+
+        _settings.BackupHistory[app.ExecutablePath].Add(new Models.SaveBackupInfo
+        {
+            BackupPath = backupFolder,
+            Timestamp = timestamp,
+            Description = description,
+            IsAutoBackup = isAutoBackup
+        });
+
+        _settings.Save();
+    }
+
     [RelayCommand]
-    private void DeleteBackup(SaveBackupInfo backup)
+    private async Task DeleteBackup(SaveBackupInfo backup)
     {
         if (SelectedApp == null || backup == null)
+            return;
+
+        var app = SelectedApp;
+
+        // Deleting a backup is permanent, so confirm first.
+        bool confirmed = await Utilities.DialogHelper.ShowConfirmationAsync(
+            _mainWindow,
+            "Delete Backup",
+            $"Permanently delete the backup \"{backup.Description}\"?\n\nThis cannot be undone.",
+            "Delete", "Cancel");
+        if (!confirmed)
             return;
 
         try
@@ -2724,10 +2835,10 @@ public partial class MainWindowViewModel : ViewModelBase
             }
 
             // Remove from UI collection
-            SelectedApp.BackupHistory.Remove(backup);
-            
+            app.BackupHistory.Remove(backup);
+
             // Remove from settings
-            if (_settings.BackupHistory.TryGetValue(SelectedApp.ExecutablePath, out var backupsInSettings))
+            if (_settings.BackupHistory.TryGetValue(app.ExecutablePath, out var backupsInSettings))
             {
                 // Find the corresponding backup in settings based on path and remove it
                 backupsInSettings.RemoveAll(b => b.BackupPath == backup.BackupPath);
@@ -2739,7 +2850,7 @@ public partial class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             StatusMessage = $"Error deleting backup: {ex.Message}";
-            Debug.WriteLine($"Error deleting backup: {ex.Message}");
+            Services.LoggingService.Instance.Error($"Error deleting backup '{backup.BackupPath}': {ex.Message}");
         }
     }
 
@@ -2911,14 +3022,24 @@ public partial class MainWindowViewModel : ViewModelBase
             // Create timestamp folder for this specific backup
             string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
             string backupFolder = Path.Combine(appBackupFolder, timestamp);
+
+            // Don't start a backup we can't finish.
+            if (!Utilities.BackupManager.HasEnoughFreeSpace(SelectedApp.SavePath, appBackupFolder, out long requiredBytes))
+            {
+                StatusMessage = $"Manual save skipped: not enough free disk space (need ~{Utilities.BackupManager.FormatBytes(requiredBytes)}).";
+                Services.LoggingService.Instance?.Warning($"Manual save for '{SelectedApp.Name}' skipped: low disk space.");
+                return;
+            }
+
             Directory.CreateDirectory(backupFolder);
-            
+
             // Count actual files copied
             int filesCopied = 0;
-            
+            var copyErrors = new List<string>();
+
             // Copy all files from the save directory to the backup folder
-            CopyDirectory(SelectedApp.SavePath, backupFolder, ref filesCopied);
-            
+            CopyDirectory(SelectedApp.SavePath, backupFolder, ref filesCopied, copyErrors);
+
             // Only create a backup entry if files were actually copied
             if (filesCopied > 0)
             {
@@ -2954,12 +3075,17 @@ public partial class MainWindowViewModel : ViewModelBase
                 }
                 _settings.BackupHistory[SelectedApp.ExecutablePath].Add(backupInfoModel);
                 _settings.Save();
-                
-                StatusMessage = $"Created manual save for '{SelectedApp.Name}'";
+
+                StatusMessage = copyErrors.Count > 0
+                    ? $"Manual save created for '{SelectedApp.Name}' — but {copyErrors.Count} file(s) were skipped (locked?)."
+                    : $"Created manual save for '{SelectedApp.Name}'";
             }
             else
             {
-                StatusMessage = "No files were copied. Save might be empty.";
+                // Distinguish a genuinely empty save from one whose files are all locked.
+                StatusMessage = copyErrors.Count > 0
+                    ? $"No files could be saved — {copyErrors.Count} file(s) are locked. Close the game and try again."
+                    : "No files were copied. Save might be empty.";
             }
         }
         else
@@ -3751,10 +3877,21 @@ public partial class MainWindowViewModel : ViewModelBase
     
     public IRelayCommand<int> MarkAsReadCommand => MarkAsReadCommandImpl ??= new RelayCommand<int>(MarkAsRead);
     private IRelayCommand<int>? MarkAsReadCommandImpl;
-    
-    private void OpenLogViewer()
+      private void OpenLogViewer()
     {
         var logViewerWindow = new Views.LogViewerWindow();
+        
+        // Register with UITranslationService for translations
+        try
+        {
+            Services.UITranslationService.Instance.TrackNewWindow(logViewerWindow);
+            Services.LoggingService.Instance.Info("Registered LogViewerWindow with UITranslationService for translations");
+        }
+        catch (Exception ex)
+        {
+            Services.LoggingService.Instance.Warning($"Failed to register LogViewerWindow with UITranslationService: {ex.Message}");
+        }
+        
         if (_mainWindow != null)
         {
             logViewerWindow.ShowDialog(_mainWindow);
@@ -3856,8 +3993,19 @@ public partial class MainWindowViewModel : ViewModelBase
             // Add all apps (they'll be filtered in SaveCarrierViewModel)
             allAppsWithSavePaths.Add(app);
         }
+          var saveCarrierWindow = new Views.SaveCarrierWindow(_settings, allAppsWithSavePaths);
         
-        var saveCarrierWindow = new Views.SaveCarrierWindow(_settings, allAppsWithSavePaths);
+        // Register the save carrier window with UITranslationService for translations
+        try
+        {
+            Services.UITranslationService.Instance.TrackNewWindow(saveCarrierWindow);
+            Services.LoggingService.Instance.Info("Registered SaveCarrierWindow with UITranslationService for translations");
+        }
+        catch (Exception ex)
+        {
+            Services.LoggingService.Instance.Warning($"Failed to register SaveCarrierWindow with UITranslationService: {ex.Message}");
+        }
+        
         if (_mainWindow != null)
         {
             saveCarrierWindow.ShowDialog(_mainWindow);

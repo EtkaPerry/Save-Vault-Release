@@ -21,9 +21,51 @@ header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
 header('Access-Control-Max-Age: 86400'); // Cache preflight response for 24 hours
-header('Access-Control-Max-Age: 86400'); // Cache preflight response for 24 hours
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
+
+/**
+ * Get Authorization header from various sources
+ * @return string|null The Authorization header or null if not found
+ */
+function getAuthHeaderFromRequest() {
+    $auth = null;
+    
+    // Method 1: Standard location
+    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        $auth = $_SERVER['HTTP_AUTHORIZATION'];
+    }
+    // Method 2: Apache specific environment variable
+    elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        $auth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    }
+    // Method 3: Try alternate capitalization
+    elseif (isset($_SERVER['Authorization'])) {
+        $auth = $_SERVER['Authorization'];
+    }
+    // Method 4: Try apache_request_headers()
+    elseif (function_exists('apache_request_headers')) {
+        $requestHeaders = apache_request_headers();
+        $requestHeaders = array_combine(
+            array_map('strtolower', array_keys($requestHeaders)), 
+            array_values($requestHeaders)
+        );
+        if (isset($requestHeaders['authorization'])) {
+            $auth = $requestHeaders['authorization'];
+        }
+    }
+    // Method 5: Check cookies as fallback
+    elseif (isset($_COOKIE['token'])) {
+        $auth = 'Bearer ' . $_COOKIE['token'];
+    }    elseif (isset($_COOKIE['auth_token'])) {
+        $auth = 'Bearer ' . $_COOKIE['auth_token'];
+    }
+    // Method 6: Check query string as last resort - REMOVED FOR SECURITY
+    // This method was removed because tokens in URLs can be logged in server logs
+    // and browser history, potentially exposing them to security risks
+    
+    return $auth;
+}
 
 // Handle preflight OPTIONS request
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -82,12 +124,7 @@ if (strpos($path, 'api/') === 0) {
 }
 
 // Get authorization header for protected routes
-$authHeader = null;
-if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
-} elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
-    $authHeader = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
-}
+$authHeader = getAuthHeaderFromRequest();
 
 // Add this function at the top level
 function sendResponse($success, $message, $data = null, $statusCode = 200) {
@@ -862,7 +899,13 @@ function extractToken($authHeader) {
         return null;
     }
     
-    if (!preg_match('/^Bearer\s+(.*?)$/', $authHeader, $matches)) {
+    if (!preg_match('/^Bearer\s+(.*?)$/i', $authHeader, $matches)) {
+        // If it doesn't have the Bearer prefix but looks like a JWT token, try to use it directly
+        if (strpos($authHeader, '.') !== false && substr_count($authHeader, '.') === 2) {
+            error_log("Token extraction: Using raw token (no Bearer prefix)");
+            return $authHeader;
+        }
+        
         error_log("Token extraction failed: Auth header does not match Bearer pattern");
         return null;
     }
@@ -940,7 +983,13 @@ function handleProfilePhotoUpload($authHeader) {
  * Handle admin request with admin verification
  */
 function handleAdminRequest($authHeader) {
-    error_log("Handling admin request with auth header: " . substr($authHeader, 0, 20) . '...');
+    error_log("Handling admin request with auth header: " . ($authHeader ? substr($authHeader, 0, 20) . '...' : 'none'));
+    
+    // Use our custom auth header retrieval function if no header was provided
+    if (!$authHeader) {
+        $authHeader = getAuthHeaderFromRequest();
+        error_log("Retrieved auth header from alternate sources: " . ($authHeader ? substr($authHeader, 0, 20) . '...' : 'still none'));
+    }
     
     $userData = authenticateRequest($authHeader);
     if (!$userData) {

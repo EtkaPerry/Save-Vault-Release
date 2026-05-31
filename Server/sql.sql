@@ -79,3 +79,37 @@ ADD COLUMN IF NOT EXISTS expires_at DATETIME NULL DEFAULT NULL;
 -- Add priority column to notifications table if not exists
 ALTER TABLE notifications
 ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0;
+
+-- Extensions table for managing downloadable extensions
+CREATE TABLE IF NOT EXISTS `extensions` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `extension_id` VARCHAR(100) NOT NULL,
+  `name` VARCHAR(255) NOT NULL,
+  `description` TEXT,
+  `version` VARCHAR(20) NOT NULL,
+  `author` VARCHAR(100) NOT NULL,
+  `category` ENUM('Official', 'Fixes', 'Localization', 'Theming', 'Other') DEFAULT 'Other',
+  `github_url` VARCHAR(255) NOT NULL,
+  `download_count` INT UNSIGNED DEFAULT 0,
+  `rating` DECIMAL(3,2) DEFAULT 0.00,
+  `icon_url` VARCHAR(255) DEFAULT NULL,
+  `is_approved` TINYINT(1) DEFAULT 0,
+  `is_official` TINYINT(1) DEFAULT 0,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `last_github_check` DATETIME DEFAULT NULL,
+  `github_updated_at` DATETIME DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_extension_id` (`extension_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- System settings table for configuration
+CREATE TABLE IF NOT EXISTS `system_settings` (
+  `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `key_name` VARCHAR(100) NOT NULL,
+  `value` TEXT,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_key_name` (`key_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

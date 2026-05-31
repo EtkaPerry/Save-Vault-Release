@@ -12,13 +12,12 @@
   
     <Application.Styles>
         <FluentTheme />
-    </Application.Styles>
-      <Application.Resources>
+    </Application.Styles>      <Application.Resources>
         <ResourceDictionary>
             <utils:StringNotEmptyConverter x:Key="StringNotEmptyConverter"/>
             <utils:IntEqualConverter x:Key="IntEqual"/>
             <ResourceDictionary.ThemeDictionaries>
-                <!-- Dark Theme Values - Using existing colors for dark mode -->
+                <!-- Default Dark Theme Values - Basic dark mode, extensions can override -->
                 <ResourceDictionary x:Key="Dark">
                     <Color x:Key="TitleBarBackground">#1a1a1a</Color>
                     <Color x:Key="MainBackground">#212121</Color>
@@ -31,10 +30,14 @@
                     <Color x:Key="StatusBarBackground">#1a1a1a</Color>
                     <Color x:Key="DividerColor">#333333</Color>
                     <Color x:Key="TextColor">White</Color>
-                    <Color x:Key="SecondaryTextColor">#aaaaaa</Color>                    <!-- Add Bitmap resource for dark theme -->                    <Bitmap x:Key="SortIconSource">/Assets/icon/dark/sort.png</Bitmap>
+                    <Color x:Key="SecondaryTextColor">#aaaaaa</Color>
+                    
+                    <!-- Icon resources for dark theme -->
+                    <Bitmap x:Key="SortIconSource">/Assets/icon/dark/sort.png</Bitmap>
                     <Bitmap x:Key="CloseIconSource">/Assets/icon/dark/close.png</Bitmap>
                     <Bitmap x:Key="AddIconSource">/Assets/icon/dark/add.png</Bitmap>
-                    <Bitmap x:Key="download.png">/Assets/icon/dark/download.png</Bitmap>                    <Bitmap x:Key="bell.png">/Assets/icon/dark/bell.png</Bitmap>
+                    <Bitmap x:Key="download.png">/Assets/icon/dark/download.png</Bitmap>
+                    <Bitmap x:Key="bell.png">/Assets/icon/dark/bell.png</Bitmap>
                     <Bitmap x:Key="setting.png">/Assets/icon/dark/setting.png</Bitmap>
                     <Bitmap x:Key="refresh.png">/Assets/icon/dark/refresh.png</Bitmap>
                     <Bitmap x:Key="logedout.png">/Assets/icon/dark/logedout.png</Bitmap>

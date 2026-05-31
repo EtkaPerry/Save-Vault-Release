@@ -42,7 +42,7 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
               <!-- Menu -->
-            <Menu Grid.Column="0" Background="Transparent" Height="30">
+            <Menu Grid.Column="0" Background="Transparent" Height="30" Name="MainMenu">
                 <MenuItem Header="File">
                     <MenuItem Header="Exit" Command="{Binding ExitApplicationCommand}"/>
                 </MenuItem>
@@ -50,6 +50,7 @@
                 <MenuItem Header="Tools">
                     <MenuItem Header="Log Viewer" Command="{Binding OpenLogViewerCommand}"/>
                     <MenuItem Header="Save Carrier" Command="{Binding ShowSaveCarrierCommand}" ToolTip.Tip="Backup and transfer game saves between devices"/>
+                    <MenuItem Header="Extensions" Name="ExtensionsMenuItem" ToolTip.Tip="Manage extensions and plugins"/>
                 </MenuItem>
             </Menu>
               <!-- Window Title - This area will be used for window dragging -->
@@ -185,7 +186,7 @@
                         <DoubleTransition Property="Opacity" Duration="0:0:0.2" Easing="CubicEaseOut"/>
                     </Transitions>
                 </Border.Transitions>
-                <DockPanel><StackPanel DockPanel.Dock="Top">                        <!-- Home section with separate logo and home buttons -->                        <Grid Margin="0,0,0,15">
+                <DockPanel><StackPanel DockPanel.Dock="Top">                        <!-- Home section with separate logo and home buttons -->                        <Grid Margin="0,0,0,15" Name="HomeSection">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="Auto"/>
@@ -234,7 +235,7 @@
                                 <Button.Flyout>
                                     <MenuFlyout Placement="BottomEdgeAlignedLeft">
                                         <!-- Update status menu item - changes appearance based on update availability -->
-                                        <MenuItem MinWidth="260" Command="{Binding CheckForUpdatesCommand}">
+                                        <MenuItem Command="{Binding CheckForUpdatesCommand}">
                                             <MenuItem.Header>
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <!-- Update icon -->
@@ -255,7 +256,7 @@
                                             </MenuItem.Header>
                                         </MenuItem>
                                           <!-- Notifications menu item with icon - hidden in offline mode -->
-                                        <MenuItem MinWidth="260" Command="{Binding ShowNotificationsCommand}" IsVisible="{Binding !IsOfflineMode}">
+                                        <MenuItem Command="{Binding ShowNotificationsCommand}" IsVisible="{Binding !IsOfflineMode}">
                                             <MenuItem.Header>
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <Image Grid.Column="0" 
@@ -281,7 +282,7 @@
                                         </MenuItem>
                                         
                                         <!-- Settings menu item with icon -->
-                                        <MenuItem Name="LogoSettingsMenuItem" MinWidth="260">
+                                        <MenuItem Name="LogoSettingsMenuItem">
                                             <MenuItem.Header>
                                                 <Grid ColumnDefinitions="Auto,*">
                                                     <Image Grid.Column="0" 

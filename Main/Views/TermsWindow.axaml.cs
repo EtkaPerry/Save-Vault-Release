@@ -18,12 +18,10 @@ public partial class TermsWindow : Window, INotifyPropertyChanged
     
     private bool _privacyPolicyChecked = false;
     private bool _termsOfServiceChecked = false;
-    private bool _securityPolicyChecked = false;
-
-    // Website URLs for policies
-    private const string PRIVACY_POLICY_URL = "https://vault.etka.co.uk/privacy-policy";
-    private const string TERMS_OF_SERVICE_URL = "https://vault.etka.co.uk/terms-of-service";
-    private const string SECURITY_POLICY_URL = "https://vault.etka.co.uk/security-policy";
+    private bool _securityPolicyChecked = false;    // Website URLs for policies
+    private const string PRIVACY_POLICY_URL = "https://etka.helioho.st/privacy-policy";
+    private const string TERMS_OF_SERVICE_URL = "https://etka.helioho.st/terms-of-service";
+    private const string SECURITY_POLICY_URL = "https://etka.helioho.st/security-policy";
     
     // Local policy file paths
     private readonly string PRIVACY_POLICY_PATH;

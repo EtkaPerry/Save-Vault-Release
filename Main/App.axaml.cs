@@ -167,6 +167,14 @@ public partial class App : Application
                 ExtensionService.Instance.LoadEnabledExtensions();
                 logger.Info("Enabled extensions loaded successfully");
 
+                // Notify extensions that the app has finished starting, and arrange a shutdown signal.
+                ExtensionEventService.Instance.TriggerEvent(ExtensionEventService.SystemEvents.ApplicationStartup, null);
+                desktop.ShutdownRequested += (_, _) =>
+                {
+                    try { ExtensionEventService.Instance.TriggerEvent(ExtensionEventService.SystemEvents.ApplicationShutdown, null); }
+                    catch (Exception shutdownEx) { logger.Warning($"Failed to dispatch app.shutdown event: {shutdownEx.Message}"); }
+                };
+
                 // Re-apply a previously selected theme extension so it persists across restarts
                 var selectedThemeExtId = settings.GetExtensionSetting("app.theme.selected");
                 if (!string.IsNullOrEmpty(selectedThemeExtId))

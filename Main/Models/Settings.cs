@@ -129,7 +129,13 @@ public class Settings
         get => _theme;
         set
         {
-            _theme = value;
+            if (_theme != value)
+            {
+                _theme = value;
+
+                // Notify extensions of the theme change (mirrors app.language.changed).
+                Services.ExtensionEventService.Instance.TriggerEvent("app.theme.changed", value);
+            }
             QueueSave();
         }
     }    // Language setting

@@ -105,8 +105,17 @@
                        VerticalAlignment="Center" 
                        Margin="10,0,0,0" 
                        FontSize="11"/>
-                         <!-- Running Apps Indicator -->
-            <StackPanel Grid.Column="2" 
+
+            <!-- Host for extension-added toolbar buttons -->
+            <StackPanel Grid.Column="1"
+                       Name="ExtensionButtonHost"
+                       Orientation="Horizontal"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Center"
+                       Margin="0,0,8,0" />
+
+            <!-- Running Apps Indicator -->
+            <StackPanel Grid.Column="2"
                        Orientation="Horizontal"
                        HorizontalAlignment="Right"
                        Margin="0,0,10,0">
@@ -843,10 +852,43 @@
                                     <Binding Path="!IsSaveCarrierVisible"/>
                                 </MultiBinding>
                             </StackPanel.IsVisible>
+                            <!-- While the initial scan runs: show progress and reassure the
+                                 user they can keep using the app (Settings, etc.) meanwhile. -->
+                            <StackPanel IsVisible="{Binding IsLoading}"
+                                        Spacing="12"
+                                        MaxWidth="440"
+                                        HorizontalAlignment="Center">
+                                <ProgressBar IsIndeterminate="True"
+                                             Width="180"
+                                             Height="4"
+                                             HorizontalAlignment="Center"/>
+                                <TextBlock Text="Searching for your installed games and apps…"
+                                           Foreground="{DynamicResource SecondaryTextColor}"
+                                           FontSize="16"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           TextAlignment="Center"/>
+                                <TextBlock Text="{Binding StatusMessage}"
+                                           Foreground="{DynamicResource SecondaryTextColor}"
+                                           FontSize="13"
+                                           HorizontalAlignment="Center"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap"/>
+                                <TextBlock Text="This can take a moment. You can open Settings or look around while we finish."
+                                           Foreground="{DynamicResource SecondaryTextColor}"
+                                           FontSize="12"
+                                           Opacity="0.8"
+                                           HorizontalAlignment="Center"
+                                           TextAlignment="Center"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+
+                            <!-- Idle: nothing selected and not loading. -->
                             <TextBlock Text="Select an application from the list"
-                                     Foreground="{DynamicResource SecondaryTextColor}"
-                                     FontSize="16"
-                                     HorizontalAlignment="Center"/>
+                                       IsVisible="{Binding !IsLoading}"
+                                       Foreground="{DynamicResource SecondaryTextColor}"
+                                       FontSize="16"
+                                       HorizontalAlignment="Center"/>
                         </StackPanel>                        <!-- Notifications Panel -->
                         <Grid IsVisible="{Binding IsNotificationsVisible}" Background="{DynamicResource MainBackground}">
                             <Grid.RowDefinitions>

@@ -27,6 +27,23 @@ public class ServerApiResponse
     public string? Error { get; set; }
 }
 
+/// <summary>
+/// Canonical capability names an extension can request in its manifest <c>permissions</c> array
+/// and that the host enforces at the Lua API boundary (see <see cref="ExtensionService.HasPermission"/>).
+/// </summary>
+public static class ExtensionPermissions
+{
+    public const string Network = "network";     // httpRequest, openUrl
+    public const string Files = "files";         // readExtensionFile / writeExtensionFile
+    public const string Clipboard = "clipboard"; // copyToClipboard
+    public const string Backups = "backups";     // getBackups / createBackupNow / restoreBackup
+    public const string Games = "games";         // getGames / getSavePath
+
+    /// <summary>Capabilities that did not exist before the permissions model and therefore always
+    /// require an explicit manifest declaration (even for legacy extensions).</summary>
+    public static readonly string[] RequireExplicitDeclaration = { Backups, Games };
+}
+
 public class ExtensionService
 {
     private static readonly Lazy<ExtensionService> _instance = new(() => new ExtensionService());
@@ -40,7 +57,7 @@ public class ExtensionService
     private const string GITHUB_LOCALIZATION_URL = "https://raw.githubusercontent.com/EtkaPerry/SaveVaultExtensions/main/Localization";
     private const string GITHUB_THEMES_URL = "https://raw.githubusercontent.com/EtkaPerry/SaveVaultExtensions/main/Themes";
     private const string GITHUB_FIXES_URL = "https://raw.githubusercontent.com/EtkaPerry/SaveVaultExtensions/main/Fixes";
-    private const string SERVER_API_URL = "https://etka.helioho.st/extensions_api.php";
+    private const string SERVER_API_URL = "https://vault.etka.co.uk/extensions_api.php";
 
     public event EventHandler<Extension>? ExtensionInstalled;
     public event EventHandler<Extension>? ExtensionUninstalled;
@@ -58,7 +75,14 @@ public class ExtensionService
 
         Directory.CreateDirectory(_extensionsPath);
         Directory.CreateDirectory(_extensionCachePath);
-        
+
+        // Forward extension lifecycle changes to the Lua event bus so extensions can react to each
+        // other being installed/enabled/etc. (subscribe before any extensions are loaded below).
+        ExtensionInstalled += (_, ext) => TriggerLifecycleEvent(ExtensionEventService.SystemEvents.ExtensionInstalled, ext);
+        ExtensionUninstalled += (_, ext) => TriggerLifecycleEvent(ExtensionEventService.SystemEvents.ExtensionUninstalled, ext);
+        ExtensionEnabled += (_, ext) => TriggerLifecycleEvent(ExtensionEventService.SystemEvents.ExtensionEnabled, ext);
+        ExtensionDisabled += (_, ext) => TriggerLifecycleEvent(ExtensionEventService.SystemEvents.ExtensionDisabled, ext);
+
         // Clean up any invalid extensions in settings
         Settings.Instance.CleanupInvalidExtensions();
 
@@ -646,10 +670,15 @@ public class ExtensionService
                         LoggingService.Instance.Info($"Extension '{extension.Name}' enabled from: {scriptPath}");
                         return true;
                     }
+
+                    // LoadExtension failed (script error, etc.) — tell the user instead of failing silently.
+                    LoggingService.Instance.Error($"Extension '{extension.Name}' failed to load; it will remain disabled");
+                    NotificationService.Instance.AddLocalNotification($"Extension '{extension.Name}' failed to load. Check the Log Viewer for details.", "error");
                 }
                 else
                 {
                     LoggingService.Instance.Warning($"Script file not found for extension '{extension.Name}' at: {scriptPath}");
+                    NotificationService.Instance.AddLocalNotification($"Extension '{extension.Name}' could not be enabled: its script file is missing.", "error");
                 }
             }
             else
@@ -740,11 +769,47 @@ public class ExtensionService
                 return false;
             }
 
-            var extensionId = idObj.ToString()!;
-            var extensionDir = Path.Combine(_extensionsPath, extensionId);
+            // The id becomes a directory name and is fully attacker-controlled, so validate it
+            // before it can be used to escape the extensions folder (zip-slip via the id).
+            var extensionId = SanitizeExtensionId(idObj.ToString());
+            if (extensionId == null)
+            {
+                LoggingService.Instance.Error($"Refusing to import extension: unsafe id '{idObj}'");
+                return false;
+            }
 
-            // Extract all files
+            var extensionsRoot = Path.GetFullPath(_extensionsPath);
+            var extensionDir = Path.GetFullPath(Path.Combine(extensionsRoot, extensionId));
+
+            // Defence in depth: even with a sanitized id, confirm the target stays under the root.
+            if (!extensionDir.StartsWith(extensionsRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                LoggingService.Instance.Error($"Refusing to import extension '{extensionId}': resolved path escapes the extensions folder");
+                return false;
+            }
+
+            // Validate every entry's destination before extracting, so a crafted entry name such as
+            // "..\\..\\evil.exe" cannot be written outside the extension's own directory (zip-slip).
+            foreach (var entry in archive.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.Name) && entry.FullName.EndsWith("/"))
+                    continue; // directory entry
+
+                var destination = Path.GetFullPath(Path.Combine(extensionDir, entry.FullName));
+                if (!destination.StartsWith(extensionDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(destination, extensionDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    LoggingService.Instance.Error($"Refusing to import extension '{extensionId}': archive entry '{entry.FullName}' escapes the extension directory");
+                    return false;
+                }
+            }
+
+            // Extract all files (paths already validated above)
             archive.ExtractToDirectory(extensionDir, true);            // Create extension object
+            var importedCategory = Enum.TryParse<ExtensionCategory>(
+                manifest.TryGetValue("category", out var catObj) ? catObj.ToString() : "Other",
+                ignoreCase: true, out var parsedCategory) ? parsedCategory : ExtensionCategory.Other;
+
             var importedExtension = new Extension
             {
                 Id = extensionId,
@@ -752,9 +817,11 @@ public class ExtensionService
                 Version = manifest.TryGetValue("version", out var version) ? version.ToString()! : "1.0.0",
                 Description = manifest.TryGetValue("description", out var desc) ? desc.ToString()! : "Imported extension",
                 Author = manifest.TryGetValue("author", out var author) ? author.ToString()! : "Unknown",
-                Category = ExtensionCategory.Other,
+                Category = importedCategory,
                 IsInstalled = true,
                 IsOfficial = false, // Imported extensions are never official
+                Permissions = ParseManifestPermissions(manifest),
+                ScriptPath = Path.Combine(extensionDir, "main.lua"),
                 CreatedDate = DateTime.Now,
                 UpdatedDate = DateTime.Now
             };
@@ -841,6 +908,107 @@ public class ExtensionService
     public Extension? FindInstalledExtensionById(string extensionId)
     {
         return _installedExtensions.FirstOrDefault(e => string.Equals(e.Id, extensionId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Decide whether an extension is allowed to use a sensitive capability. The rules:
+    /// <list type="bullet">
+    /// <item>Official / built-in extensions are trusted and may use anything.</item>
+    /// <item>If the manifest declares a <c>permissions</c> array, it is enforced strictly — only the
+    /// listed capabilities are granted.</item>
+    /// <item>If the manifest declares nothing (legacy extension), the capabilities that existed
+    /// before the permissions model (network, files, clipboard) stay granted, but brand-new
+    /// capabilities (backups, games) require an explicit declaration.</item>
+    /// </list>
+    /// Low-risk capabilities (logging, settings, translation, events, generic UI) are never routed
+    /// through here — they are always available.
+    /// </summary>
+    public bool HasPermission(string extensionId, string permission)
+    {
+        var extension = FindInstalledExtensionById(extensionId);
+        return extension != null && EvaluatePermission(extension, permission);
+    }
+
+    /// <summary>
+    /// Pure policy evaluation for an extension's capability (see <see cref="HasPermission"/> for the
+    /// rules). Exposed so a caller that already holds the <see cref="Extension"/> (e.g. the Lua engine
+    /// during initial load) can decide without re-entering this singleton.
+    /// </summary>
+    public static bool EvaluatePermission(Extension extension, string permission)
+    {
+        // Trust first-party content shipped/curated with the app.
+        if (extension.IsOfficial || extension.Id.StartsWith("savevault.", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Manifest declared an explicit set -> strict allow-list.
+        if (extension.Permissions != null)
+            return extension.Permissions.Any(p => string.Equals(p, permission, StringComparison.OrdinalIgnoreCase));
+
+        // Legacy extension (no permissions key): grant historically-available capabilities, but
+        // require an explicit opt-in for capabilities introduced alongside the permissions model.
+        return !ExtensionPermissions.RequireExplicitDeclaration
+            .Any(p => string.Equals(p, permission, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Validate an extension id taken from an untrusted manifest so it can be used as a single
+    /// folder name. Rejects path separators, traversal segments and characters illegal in a file
+    /// name. Returns null when the id is unusable.
+    /// </summary>
+    private static string? SanitizeExtensionId(string? rawId)
+    {
+        if (string.IsNullOrWhiteSpace(rawId))
+            return null;
+
+        var id = rawId.Trim();
+
+        // Must be a single path segment: no directory separators and not a traversal token.
+        if (id is "." or ".." ||
+            id.Contains('/') || id.Contains('\\') ||
+            id.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+            !string.Equals(Path.GetFileName(id), id, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return id;
+    }
+
+    /// <summary>
+    /// Pull the optional <c>permissions</c> array out of a manifest deserialized as a loose
+    /// dictionary. Returns null when the key is absent (legacy extension) so the distinction between
+    /// "declared nothing" and "declared an empty set" is preserved.
+    /// </summary>
+    private static List<string>? ParseManifestPermissions(Dictionary<string, object> manifest)
+    {
+        if (!manifest.TryGetValue("permissions", out var permsObj) || permsObj is not JsonElement el ||
+            el.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        return el.EnumerateArray()
+            .Select(p => p.GetString() ?? "")
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p.Trim())
+            .ToList();
+    }
+
+    /// <summary>
+    /// Dispatch an extension-lifecycle system event (with a small JSON payload) to subscribed Lua
+    /// extensions. Best-effort: a failure here must never break install/enable flows.
+    /// </summary>
+    private static void TriggerLifecycleEvent(string eventName, Extension ext)
+    {
+        try
+        {
+            var payload = JsonSerializer.Serialize(new { id = ext.Id, name = ext.Name, version = ext.Version });
+            ExtensionEventService.Instance.TriggerEvent(eventName, payload);
+        }
+        catch (Exception ex)
+        {
+            LoggingService.Instance.Warning($"Failed to dispatch '{eventName}' to extensions: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -987,7 +1155,8 @@ public class ExtensionService
                             : "Unknown",                        Category = Enum.TryParse<ExtensionCategory>(manifest.TryGetValue("category", out var cat) ? cat.ToString()! : "Other", out var category) ? category : ExtensionCategory.Other,
                         IsInstalled = true,
                         IsEnabled = Settings.Instance.IsExtensionEnabled(extensionId),                        ScriptPath = Path.Combine(extensionDir, "main.lua"),
-                        IsOfficial = manifest.TryGetValue("isOfficial", out var isOfficialObj) && isOfficialObj is JsonElement isOfficialElement && isOfficialElement.GetBoolean()
+                        IsOfficial = manifest.TryGetValue("isOfficial", out var isOfficialObj) && isOfficialObj is JsonElement isOfficialElement && isOfficialElement.GetBoolean(),
+                        Permissions = ParseManifestPermissions(manifest)
                     };
 
                     _installedExtensions.Add(extension);
@@ -1107,7 +1276,8 @@ public class ExtensionService
                         IsEnabled = isEnabledInSettings || (isInstalledInSettings && shouldAutoEnable),
                         ScriptPath = Path.Combine(extensionDir, "main.lua"),                        Tags = manifest.TryGetValue("tags", out var tagsObj) && tagsObj is JsonElement tagsElement 
                             ? tagsElement.EnumerateArray().Select(t => t.GetString() ?? "").Where(t => !string.IsNullOrEmpty(t)).ToList()                            : new List<string>(),
-                        IsOfficial = manifest.TryGetValue("isOfficial", out var isOfficialObj) && isOfficialObj is JsonElement isOfficialElement && isOfficialElement.GetBoolean()
+                        IsOfficial = manifest.TryGetValue("isOfficial", out var isOfficialObj) && isOfficialObj is JsonElement isOfficialElement && isOfficialElement.GetBoolean(),
+                        Permissions = ParseManifestPermissions(manifest)
                     };// Set icon URL if icon file exists
                     if (manifest.TryGetValue("icon", out var iconObj) && !string.IsNullOrWhiteSpace(iconObj?.ToString()))
                     {
@@ -1175,7 +1345,12 @@ public class ExtensionService
                     baseUrl = $"{GITHUB_FIXES_URL}/{extension.Id}/";
                     iconFileName = "icon.png";
                     break;
-                    
+
+                case ExtensionCategory.Official:
+                    baseUrl = $"{GITHUB_BASE_URL}/Official/{extension.Id}/";
+                    iconFileName = "icon.png";
+                    break;
+
                 default: // ExtensionCategory.Other and any future categories
                     baseUrl = $"{GITHUB_BASE_URL}/Official/{extension.Id}/";
                     iconFileName = "icon.png";

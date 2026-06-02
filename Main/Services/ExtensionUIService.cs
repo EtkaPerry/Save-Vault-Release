@@ -77,7 +77,7 @@ public class ExtensionUIService
     /// <summary>
     /// Add a button to the toolbar or status bar
     /// </summary>
-    public bool AddButton(string extensionId, string location, string buttonText, string? tooltip = null)
+    public bool AddButton(string extensionId, string location, string buttonText, string callbackFunction, string? tooltip = null)
     {
         try
         {
@@ -86,6 +86,7 @@ public class ExtensionUIService
                 ExtensionId = extensionId,
                 Location = location,
                 Text = buttonText,
+                CallbackFunction = callbackFunction,
                 Tooltip = tooltip
             };
 
@@ -376,15 +377,68 @@ public class ExtensionUIService
 
     private void AddButtonToUI(ExtensionButton button)
     {
-        // Implementation for adding buttons to toolbar/status bar
-        // This would need to be integrated with the main window layout
-        LoggingService.Instance.Info($"Button UI integration not yet implemented for location: {button.Location}");
+        if (_mainWindow == null)
+        {
+            LoggingService.Instance.Warning($"Cannot add button '{button.Text}': MainWindow not initialized");
+            return;
+        }
+
+        try
+        {
+            var host = _mainWindow.FindControl<StackPanel>("ExtensionButtonHost");
+            if (host == null)
+            {
+                LoggingService.Instance.Warning("ExtensionButtonHost panel not found; cannot add extension button");
+                return;
+            }
+
+            var uiButton = new Button
+            {
+                Content = button.Text,
+                Tag = button.ExtensionId,
+                Margin = new Avalonia.Thickness(4, 0, 0, 0),
+                Padding = new Avalonia.Thickness(8, 2),
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center
+            };
+
+            if (!string.IsNullOrEmpty(button.Tooltip))
+                ToolTip.SetTip(uiButton, button.Tooltip);
+
+            // Capture locals so the click handler doesn't depend on mutable state.
+            var extensionId = button.ExtensionId;
+            var callback = button.CallbackFunction;
+            var text = button.Text;
+            uiButton.Click += (s, e) =>
+            {
+                if (!string.IsNullOrEmpty(callback))
+                    LuaEngine.Instance.TriggerExtensionCallback(extensionId, callback, text);
+            };
+
+            host.Children.Add(uiButton);
+            button.UIElement = uiButton;
+            LoggingService.Instance.Info($"Added toolbar button '{button.Text}' for extension '{button.ExtensionId}'");
+        }
+        catch (Exception ex)
+        {
+            LoggingService.Instance.Error($"Failed to add button to UI: {ex.Message}");
+        }
     }
 
     private void RemoveButtonFromUI(ExtensionButton button)
     {
-        // Implementation for removing buttons
-        LoggingService.Instance.Info($"Button removal not yet implemented for location: {button.Location}");
+        if (button.UIElement == null || _mainWindow == null)
+            return;
+
+        try
+        {
+            var host = _mainWindow.FindControl<StackPanel>("ExtensionButtonHost");
+            if (host != null && host.Children.Contains(button.UIElement))
+                host.Children.Remove(button.UIElement);
+        }
+        catch (Exception ex)
+        {
+            LoggingService.Instance.Error($"Failed to remove button from UI: {ex.Message}");
+        }
     }
 
     private MenuItem? FindMenuByName(string menuName)
@@ -471,6 +525,7 @@ public class ExtensionButton
     public string ExtensionId { get; set; } = "";
     public string Location { get; set; } = "";
     public string Text { get; set; } = "";
+    public string CallbackFunction { get; set; } = "";
     public string? Tooltip { get; set; }
     public Button? UIElement { get; set; }
 }

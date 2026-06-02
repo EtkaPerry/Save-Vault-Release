@@ -23,9 +23,68 @@ public class LuaEngine
     // Tracked so we can revert them cleanly when switching themes (no restart needed).
     private readonly HashSet<string> _themeOverrideKeys = new();
 
+    // One HttpClient for all extension HTTP traffic (avoids per-request socket exhaustion).
+    private static readonly HttpClient _sharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+
+    // --- Execution watchdog: aborts runaway Lua (e.g. `while true do end`) so a misbehaving
+    // extension can't freeze the app. Implemented with a KeraLua instruction-count hook that
+    // raises a Lua error once a wall-clock deadline passes. Note: this only interrupts Lua VM
+    // execution, not time spent inside a blocking host API call.
+    private const int ExecutionTimeoutMs = 5000;
+    private const int WatchdogInstructionInterval = 1000; // check the deadline every N VM instructions
+    private readonly KeraLua.LuaHookFunction _watchdogHook;
+    private System.Diagnostics.Stopwatch? _executionStopwatch;
+    private int _executionLimitMs;
+    private int _guardDepth;
+
     private LuaEngine()
     {
+        _watchdogHook = OnWatchdogTick;
         InitializeLua();
+    }
+
+    private void OnWatchdogTick(IntPtr luaState, IntPtr ar)
+    {
+        var sw = _executionStopwatch;
+        if (sw != null && sw.ElapsedMilliseconds > _executionLimitMs)
+        {
+            // Raise a Lua error; NLua surfaces it as an exception caught by the guarded caller.
+            // The message has no '%' so it is safe to pass as the luaL_error format string.
+            var message = $"Extension aborted: exceeded {_executionLimitMs} ms execution limit";
+            KeraLua.Lua.FromIntPtr(luaState).Error(message, Array.Empty<object>());
+        }
+    }
+
+    /// <summary>
+    /// Run a piece of Lua execution (script load or callback) under the time watchdog. Nested calls
+    /// share the outermost deadline. The hook is cleared when the outermost call returns.
+    /// </summary>
+    private void RunGuarded(Action action)
+    {
+        if (_lua == null) { action(); return; }
+
+        bool top = _guardDepth == 0;
+        if (top)
+        {
+            _executionLimitMs = ExecutionTimeoutMs;
+            _executionStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            _lua.State.SetHook(_watchdogHook, KeraLua.LuaHookMask.Count, WatchdogInstructionInterval);
+        }
+
+        _guardDepth++;
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _guardDepth--;
+            if (_guardDepth == 0)
+            {
+                try { _lua.State.SetHook(_watchdogHook, KeraLua.LuaHookMask.Disabled, 0); } catch { /* best effort */ }
+                _executionStopwatch = null;
+            }
+        }
     }
 
     private void InitializeLua()
@@ -34,10 +93,14 @@ public class LuaEngine
         {
             _lua = new Lua();
             _lua.State.Encoding = System.Text.Encoding.UTF8;
-            
+
             // Register safe API functions for extensions
             RegisterApiMethods();
-            
+
+            // Provide a `json` helper so extensions can parse the JSON payloads carried by host
+            // events (backup created, scan completed, ...) and build JSON for their own use.
+            InjectRuntimeLibrary();
+
             LoggingService.Instance.Info("Lua engine initialized successfully");
         }
         catch (Exception ex)
@@ -101,6 +164,13 @@ public class LuaEngine
 
         // Register theming functions
         _lua.RegisterFunction("setThemeResource", this, typeof(LuaEngine).GetMethod(nameof(SetThemeResource)));
+
+        // Register host-data functions (gated by the "games" / "backups" manifest permissions)
+        _lua.RegisterFunction("getGames", this, typeof(LuaEngine).GetMethod(nameof(GetGames)));
+        _lua.RegisterFunction("getSavePath", this, typeof(LuaEngine).GetMethod(nameof(GetSavePath)));
+        _lua.RegisterFunction("getBackups", this, typeof(LuaEngine).GetMethod(nameof(GetBackups)));
+        _lua.RegisterFunction("createBackupNow", this, typeof(LuaEngine).GetMethod(nameof(CreateBackupNow)));
+        _lua.RegisterFunction("restoreBackup", this, typeof(LuaEngine).GetMethod(nameof(RestoreBackup)));
     }    public bool LoadExtension(Extension extension, string scriptContent)
     {
         if (_lua == null)
@@ -109,38 +179,46 @@ public class LuaEngine
             return false;
         }
 
+        var lua = _lua!; // non-null: checked above
         try
         {
             LoggingService.Instance.Info($"Loading extension '{extension.Name}' (ID: {extension.Id})");
-            
+
             // Set extension context
-            _lua["currentExtensionId"] = extension.Id;
-            _lua["currentExtensionName"] = extension.Name;
-            _lua["currentExtensionVersion"] = extension.Version;
-            
-            // Execute the extension script
-            LoggingService.Instance.Info($"Executing Lua script for extension '{extension.Name}'");
-            _lua.DoString(scriptContent);
-            
-            // Call initialization function if it exists
-            var initFunction = _lua["onLoad"];
-            if (initFunction is LuaFunction initFunc)
-            {
-                LoggingService.Instance.Info($"Calling onLoad() for extension '{extension.Name}'");
-                initFunc.Call();
-                LoggingService.Instance.Info($"onLoad() completed for extension '{extension.Name}'");
-            }
-            else
-            {
-                LoggingService.Instance.Warning($"No onLoad() function found for extension '{extension.Name}'");
-            }
-            
+            lua["currentExtensionId"] = extension.Id;
+            lua["currentExtensionName"] = extension.Name;
+            lua["currentExtensionVersion"] = extension.Version;
+
+            // Register before running the script so permission checks made by API calls during
+            // onLoad() can resolve this extension's manifest policy.
             _loadedExtensions[extension.Id] = extension;
+
+            RunGuarded(() =>
+            {
+                // Execute the extension script
+                LoggingService.Instance.Info($"Executing Lua script for extension '{extension.Name}'");
+                lua.DoString(scriptContent);
+
+                // Call initialization function if it exists
+                var initFunction = lua["onLoad"];
+                if (initFunction is LuaFunction initFunc)
+                {
+                    LoggingService.Instance.Info($"Calling onLoad() for extension '{extension.Name}'");
+                    initFunc.Call();
+                    LoggingService.Instance.Info($"onLoad() completed for extension '{extension.Name}'");
+                }
+                else
+                {
+                    LoggingService.Instance.Warning($"No onLoad() function found for extension '{extension.Name}'");
+                }
+            });
+
             LoggingService.Instance.Info($"Extension '{extension.Name}' loaded and registered successfully");
             return true;
         }
         catch (Exception ex)
         {
+            _loadedExtensions.Remove(extension.Id); // roll back the early registration
             LoggingService.Instance.Error($"Failed to load extension '{extension.Name}': {ex.Message}");
             LoggingService.Instance.Error($"Script content preview: {scriptContent.Substring(0, Math.Min(200, scriptContent.Length))}...");
             return false;
@@ -263,25 +341,18 @@ public class LuaEngine
     {
         if (_lua?["currentExtensionId"] is not string extensionId)
             return null;
+        if (DenyMissing(ExtensionPermissions.Files, "readExtensionFile"))
+            return null;
 
         try
         {
-            var extensionPath = GetExtensionPath(extensionId);
-            var filePath = Path.Combine(extensionPath, fileName);
-            
-            // Security check: ensure file is within extension directory
-            if (!filePath.StartsWith(extensionPath))
+            if (!TryResolveSandboxedPath(extensionId, fileName, out var filePath))
             {
                 LoggingService.Instance.Warning($"Extension '{extensionId}' attempted to access file outside its directory: {fileName}");
                 return null;
             }
 
-            if (File.Exists(filePath))
-            {
-                return File.ReadAllText(filePath);
-            }
-            
-            return null;
+            return File.Exists(filePath) ? File.ReadAllText(filePath) : null;
         }
         catch (Exception ex)
         {
@@ -294,14 +365,12 @@ public class LuaEngine
     {
         if (_lua?["currentExtensionId"] is not string extensionId)
             return false;
+        if (DenyMissing(ExtensionPermissions.Files, "writeExtensionFile"))
+            return false;
 
         try
         {
-            var extensionPath = GetExtensionPath(extensionId);
-            var filePath = Path.Combine(extensionPath, fileName);
-            
-            // Security check: ensure file is within extension directory
-            if (!filePath.StartsWith(extensionPath))
+            if (!TryResolveSandboxedPath(extensionId, fileName, out var filePath))
             {
                 LoggingService.Instance.Warning($"Extension '{extensionId}' attempted to write file outside its directory: {fileName}");
                 return false;
@@ -325,9 +394,71 @@ public class LuaEngine
             "SaveVault",
             "Extensions",
             extensionId);
-        
+
         Directory.CreateDirectory(appDataPath);
         return appDataPath;
+    }
+
+    /// <summary>
+    /// Resolve <paramref name="fileName"/> against the extension's private directory and confirm the
+    /// fully-normalized result stays inside it. This defeats "..\\.." traversal, which
+    /// <see cref="Path.Combine(string, string)"/> leaves un-normalized (so a naive StartsWith check
+    /// would pass). Returns false when the path escapes the sandbox.
+    /// </summary>
+    private static bool TryResolveSandboxedPath(string extensionId, string fileName, out string fullPath)
+    {
+        fullPath = "";
+        var root = Path.GetFullPath(GetExtensionPath(extensionId));
+        var combined = Path.GetFullPath(Path.Combine(root, fileName));
+
+        if (!string.Equals(combined, root, StringComparison.OrdinalIgnoreCase) &&
+            !combined.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        fullPath = combined;
+        return true;
+    }
+
+    /// <summary>True when the current extension is allowed to use the given capability.</summary>
+    private bool CurrentExtensionAllowed(string permission)
+    {
+        if (_lua?["currentExtensionId"] is not string extensionId)
+            return false;
+
+        // Prefer the already-loaded Extension (avoids re-entering the ExtensionService singleton
+        // while it is still constructing during initial load); fall back to the service otherwise.
+        var ext = _loadedExtensions.TryGetValue(extensionId, out var loaded)
+            ? loaded
+            : ExtensionService.Instance.FindInstalledExtensionById(extensionId);
+
+        return ext != null && ExtensionService.EvaluatePermission(ext, permission);
+    }
+
+    /// <summary>Returns true (and logs) when the current extension lacks the required capability.</summary>
+    private bool DenyMissing(string permission, string apiName)
+    {
+        if (CurrentExtensionAllowed(permission))
+            return false;
+
+        var id = _lua?["currentExtensionId"] as string ?? "?";
+        LoggingService.Instance.Warning($"Extension '{id}' denied '{apiName}': missing '{permission}' permission");
+        return true;
+    }
+
+    /// <summary>Only http/https URLs may be fetched by extensions (blocks file://, data:, etc.).</summary>
+    private static bool IsAllowedWebUrl(string url)
+    {
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+               (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+    }
+
+    /// <summary>Extensions may only open http/https/mailto links externally (no local files/exes).</summary>
+    private static bool IsAllowedExternalUrl(string url)
+    {
+        return Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+               (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeMailto);
     }
 
     // UI API Methods
@@ -340,12 +471,12 @@ public class LuaEngine
         return ExtensionUIService.Instance.AddMenuItem(extensionId, menuName, itemText, tooltip);
     }
 
-    public bool AddButton(string location, string buttonText, string? tooltip = null)
+    public bool AddButton(string location, string buttonText, string callbackFunction, string? tooltip = null)
     {
         if (_lua?["currentExtensionId"] is not string extensionId)
             return false;
 
-        return ExtensionUIService.Instance.AddButton(extensionId, location, buttonText, tooltip);
+        return ExtensionUIService.Instance.AddButton(extensionId, location, buttonText, callbackFunction, tooltip);
     }
 
     public bool CreateWindow(string windowTitle, double width = 400, double height = 300)
@@ -558,8 +689,8 @@ public class LuaEngine
             var callbackFunction = _lua[functionName];
             if (callbackFunction is LuaFunction callback)
             {
-                // Call with arguments
-                callback.Call(args);
+                // Call with arguments under the execution watchdog
+                RunGuarded(() => callback.Call(args));
                 LoggingService.Instance.Info($"Called callback '{functionName}' for extension '{extensionId}'");
             }
             else
@@ -572,6 +703,205 @@ public class LuaEngine
             LoggingService.Instance.Error($"Failed to trigger callback '{functionName}' for extension '{extensionId}': {ex.Message}");
         }    }
 
+    // Host data API Methods (games & backups) — gated by manifest permissions
+
+    /// <summary>Returns a JSON array of installed games/apps. Requires the "games" permission.</summary>
+    public string GetGames()
+    {
+        if (DenyMissing(ExtensionPermissions.Games, "getGames"))
+            return "[]";
+        return ExtensionHostService.Instance.GetGamesJson();
+    }
+
+    /// <summary>Returns the save-folder path for the named game (empty if unknown). Requires "games".</summary>
+    public string GetSavePath(string gameName)
+    {
+        if (DenyMissing(ExtensionPermissions.Games, "getSavePath"))
+            return "";
+        return ExtensionHostService.Instance.GetSavePath(gameName ?? "");
+    }
+
+    /// <summary>Returns a JSON array of backups for the named game. Requires the "backups" permission.</summary>
+    public string GetBackups(string gameName)
+    {
+        if (DenyMissing(ExtensionPermissions.Backups, "getBackups"))
+            return "[]";
+        return ExtensionHostService.Instance.GetBackupsJson(gameName ?? "");
+    }
+
+    /// <summary>Triggers an immediate backup of the named game. Requires the "backups" permission.</summary>
+    public bool CreateBackupNow(string gameName)
+    {
+        if (DenyMissing(ExtensionPermissions.Backups, "createBackupNow"))
+            return false;
+        return ExtensionHostService.Instance.TriggerBackup(gameName ?? "");
+    }
+
+    /// <summary>Restores the named game from the given backup path. Requires the "backups" permission.</summary>
+    public bool RestoreBackup(string gameName, string backupPath)
+    {
+        if (DenyMissing(ExtensionPermissions.Backups, "restoreBackup"))
+            return false;
+        return ExtensionHostService.Instance.TriggerRestore(gameName ?? "", backupPath ?? "");
+    }
+
+    /// <summary>
+    /// Inject the small <c>json</c> helper (encode/decode) so extensions can work with the JSON
+    /// payloads carried by host events. Pure Lua — avoids fragile C#-to-Lua table marshaling. The
+    /// source deliberately uses only single-quoted strings and char codes (no double quotes or
+    /// backslashes) so it embeds cleanly in a C# verbatim string.
+    /// </summary>
+    private void InjectRuntimeLibrary()
+    {
+        if (_lua == null) return;
+        try
+        {
+            _lua.DoString(JsonLibrarySource);
+        }
+        catch (Exception ex)
+        {
+            LoggingService.Instance.Error($"Failed to inject extension runtime library: {ex.Message}");
+        }
+    }
+
+    private const string JsonLibrarySource = @"
+json = (function()
+  local lib = {}
+  local q = string.char(34)   -- double quote
+  local bs = string.char(92)  -- backslash
+  local WS = string.char(9, 10, 13)
+
+  local escape_map = {}
+  escape_map[q]  = bs .. q
+  escape_map[bs] = bs .. bs
+  escape_map[string.char(10)] = bs .. 'n'
+  escape_map[string.char(13)] = bs .. 'r'
+  escape_map[string.char(9)]  = bs .. 't'
+
+  local function escape_str(s)
+    local out = (s:gsub('[%c' .. q .. bs .. ']', function(c)
+      return escape_map[c] or string.format(bs .. 'u%04x', string.byte(c))
+    end))
+    return q .. out .. q
+  end
+
+  local function is_array(t)
+    local n = 0
+    for k in pairs(t) do
+      if type(k) ~= 'number' then return false end
+      n = n + 1
+    end
+    return n == #t
+  end
+
+  local encode_value
+  encode_value = function(v)
+    local tv = type(v)
+    if v == nil then return 'null'
+    elseif tv == 'string' then return escape_str(v)
+    elseif tv == 'number' then return tostring(v)
+    elseif tv == 'boolean' then return tostring(v)
+    elseif tv == 'table' then
+      local parts = {}
+      if is_array(v) then
+        for _, item in ipairs(v) do parts[#parts+1] = encode_value(item) end
+        return '[' .. table.concat(parts, ',') .. ']'
+      end
+      for k, item in pairs(v) do parts[#parts+1] = escape_str(tostring(k)) .. ':' .. encode_value(item) end
+      return '{' .. table.concat(parts, ',') .. '}'
+    end
+    return 'null'
+  end
+
+  function lib.encode(v) return encode_value(v) end
+
+  local parse
+  local function skip_ws(s, i) return s:find('[^ ' .. WS .. ']', i) or (#s + 1) end
+
+  local function parse_str(s, i)
+    local res, j = {}, i + 1
+    while j <= #s do
+      local c = s:sub(j, j)
+      if c == q then return table.concat(res), j + 1
+      elseif c == bs then
+        local n = s:sub(j + 1, j + 1)
+        if n == 'n' then res[#res+1] = string.char(10)
+        elseif n == 't' then res[#res+1] = string.char(9)
+        elseif n == 'r' then res[#res+1] = string.char(13)
+        elseif n == 'b' then res[#res+1] = string.char(8)
+        elseif n == 'f' then res[#res+1] = string.char(12)
+        elseif n == 'u' then
+          local code = tonumber(s:sub(j + 2, j + 5), 16) or 0
+          if code < 0x80 then res[#res+1] = string.char(code)
+          elseif code < 0x800 then res[#res+1] = string.char(0xC0 + math.floor(code / 0x40), 0x80 + (code % 0x40))
+          else res[#res+1] = string.char(0xE0 + math.floor(code / 0x1000), 0x80 + (math.floor(code / 0x40) % 0x40), 0x80 + (code % 0x40)) end
+          j = j + 4
+        else res[#res+1] = n end
+        j = j + 2
+      else
+        res[#res+1] = c
+        j = j + 1
+      end
+    end
+    error('unterminated string')
+  end
+
+  parse = function(s, i)
+    i = skip_ws(s, i)
+    local c = s:sub(i, i)
+    if c == '{' then
+      local obj = {}
+      i = skip_ws(s, i + 1)
+      if s:sub(i, i) == '}' then return obj, i + 1 end
+      while true do
+        local key
+        key, i = parse_str(s, skip_ws(s, i))
+        i = skip_ws(s, i) + 1
+        local val
+        val, i = parse(s, i)
+        obj[key] = val
+        i = skip_ws(s, i)
+        local ch = s:sub(i, i)
+        if ch == ',' then i = i + 1
+        elseif ch == '}' then return obj, i + 1
+        else error('expected , or } in object') end
+      end
+    elseif c == '[' then
+      local arr = {}
+      i = skip_ws(s, i + 1)
+      if s:sub(i, i) == ']' then return arr, i + 1 end
+      while true do
+        local val
+        val, i = parse(s, i)
+        arr[#arr+1] = val
+        i = skip_ws(s, i)
+        local ch = s:sub(i, i)
+        if ch == ',' then i = i + 1
+        elseif ch == ']' then return arr, i + 1
+        else error('expected , or ] in array') end
+      end
+    elseif c == q then
+      return parse_str(s, i)
+    elseif c == 't' then return true, i + 4
+    elseif c == 'f' then return false, i + 5
+    elseif c == 'n' then return nil, i + 4
+    else
+      local e = s:find('[^%-+0-9.eE]', i) or (#s + 1)
+      return tonumber(s:sub(i, e - 1)), e
+    end
+  end
+
+  function lib.decode(str)
+    if type(str) ~= 'string' or str == '' then return nil end
+    local ok, result = pcall(function() local v = parse(str, 1); return v end)
+    if ok then return result end
+    return nil
+  end
+
+  return lib
+end)()
+";
+
     public void Dispose()
     {
         // Unload all extensions and clean up their resources
@@ -579,7 +909,7 @@ public class LuaEngine
         {
             UnloadExtension(extensionId);
         }
-        
+
         _lua?.Dispose();
         _lua = null;
     }
@@ -590,14 +920,29 @@ public class LuaEngine
     {
         if (_lua?["currentExtensionId"] is not string extensionId)
             return;
+        if (DenyMissing(ExtensionPermissions.Network, "httpRequest"))
+            return;
+
+        if (!IsAllowedWebUrl(url))
+        {
+            LoggingService.Instance.Warning($"Extension '{extensionId}' blocked httpRequest to disallowed URL: {url}");
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                TriggerExtensionCallback(extensionId, callbackFunction, "false", "0", "Blocked: only http/https URLs are allowed"));
+            return;
+        }
 
         Task.Run(async () =>
         {
             try
             {
-                using var client = new HttpClient();
-                
-                // Add headers
+                using var request = new HttpRequestMessage(new HttpMethod((method ?? "GET").ToUpperInvariant()), url);
+
+                if (!string.IsNullOrEmpty(body) &&
+                    (request.Method == HttpMethod.Post || request.Method == HttpMethod.Put || request.Method == HttpMethod.Patch))
+                {
+                    request.Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+                }
+
                 if (!string.IsNullOrEmpty(headersJson))
                 {
                     try
@@ -607,7 +952,9 @@ public class LuaEngine
                         {
                             foreach (var header in headers)
                             {
-                                client.DefaultRequestHeaders.TryAddWithoutValidation(header.Key, header.Value);
+                                // Header may belong on the request or the content; try both.
+                                if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value))
+                                    request.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value);
                             }
                         }
                     }
@@ -617,33 +964,7 @@ public class LuaEngine
                     }
                 }
 
-                HttpResponseMessage response;
-                var httpMethod = new HttpMethod(method.ToUpper());
-
-                if (httpMethod == HttpMethod.Get)
-                {
-                    response = await client.GetAsync(url);
-                }
-                else if (httpMethod == HttpMethod.Post)
-                {
-                    var content = new StringContent(body ?? "", System.Text.Encoding.UTF8, "application/json");
-                    response = await client.PostAsync(url, content);
-                }
-                else if (httpMethod == HttpMethod.Put)
-                {
-                    var content = new StringContent(body ?? "", System.Text.Encoding.UTF8, "application/json");
-                    response = await client.PutAsync(url, content);
-                }
-                else if (httpMethod == HttpMethod.Delete)
-                {
-                    response = await client.DeleteAsync(url);
-                }
-                else
-                {
-                    LoggingService.Instance.Warning($"Unsupported HTTP method '{method}' for extension '{extensionId}'");
-                    return;
-                }
-
+                using var response = await _sharedHttpClient.SendAsync(request);
                 var responseBody = await response.Content.ReadAsStringAsync();
                 var statusCode = (int)response.StatusCode;
                 var isSuccess = response.IsSuccessStatusCode;
@@ -689,6 +1010,9 @@ public class LuaEngine
 
     public void CopyToClipboard(string text)
     {
+        if (DenyMissing(ExtensionPermissions.Clipboard, "copyToClipboard"))
+            return;
+
         Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
         {
             if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop)
@@ -704,6 +1028,15 @@ public class LuaEngine
 
     public void OpenUrl(string url)
     {
+        if (DenyMissing(ExtensionPermissions.Network, "openUrl"))
+            return;
+
+        if (!IsAllowedExternalUrl(url))
+        {
+            LoggingService.Instance.Warning($"Extension blocked from opening a non-web URL: {url}");
+            return;
+        }
+
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
@@ -730,7 +1063,9 @@ public class LuaEngine
                 if (Avalonia.Application.Current != null)
                 {
                     // Look up extension metadata to enforce safety rules
-                    var extension = ExtensionService.Instance.FindInstalledExtensionById(extensionId);
+                    var extension = _loadedExtensions.TryGetValue(extensionId, out var loadedExt)
+                        ? loadedExt
+                        : ExtensionService.Instance.FindInstalledExtensionById(extensionId);
                     if (extension == null)
                     {
                         LoggingService.Instance.Warning($"SetThemeResource called by unknown extension '{extensionId}', ignoring");
@@ -826,13 +1161,23 @@ public class LuaEngine
             _lua["currentExtensionName"] = extension.Name;
             _lua["currentExtensionVersion"] = extension.Version;
 
-            // Re-run the script so this extension's globals (incl. applyTheme) are current
-            _lua.DoString(File.ReadAllText(extension.ScriptPath));
-
-            var applyFunction = _lua["applyTheme"];
-            if (applyFunction is LuaFunction applyFunc)
+            // Re-run the script so this extension's globals (incl. applyTheme) are current,
+            // under the execution watchdog.
+            var lua = _lua!; // non-null: checked at method entry
+            var scriptText = File.ReadAllText(extension.ScriptPath);
+            bool applied = false;
+            RunGuarded(() =>
             {
-                applyFunc.Call();
+                lua.DoString(scriptText);
+                if (lua["applyTheme"] is LuaFunction applyFunc)
+                {
+                    applyFunc.Call();
+                    applied = true;
+                }
+            });
+
+            if (applied)
+            {
                 LoggingService.Instance.Info($"Applied theme extension '{extension.Name}'");
                 return true;
             }

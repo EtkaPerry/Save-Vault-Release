@@ -15,6 +15,12 @@ public class ExtensionEventService
     private readonly Dictionary<string, List<ExtensionEventHandler>> _eventHandlers = new();
     private readonly Dictionary<string, List<string>> _extensionSubscriptions = new();
 
+    // Guards against synchronous re-entrant dispatch of the same event on one thread (e.g. a
+    // handler that re-triggers the event it is handling), which would otherwise recurse until the
+    // stack overflows. Thread-static so it never interferes with legitimate concurrent dispatch.
+    [ThreadStatic]
+    private static HashSet<string>? _dispatchingOnThread;
+
     private ExtensionEventService()
     {
     }
@@ -60,6 +66,13 @@ public class ExtensionEventService
     /// </summary>
     public void TriggerEvent(string eventName, object? data = null)
     {
+        var dispatching = _dispatchingOnThread ??= new HashSet<string>();
+        if (!dispatching.Add(eventName))
+        {
+            LoggingService.Instance.Warning($"Skipping re-entrant trigger of event '{eventName}' (a handler re-triggered it)");
+            return;
+        }
+
         try
         {
             if (_eventHandlers.TryGetValue(eventName, out var handlers))
@@ -87,6 +100,10 @@ public class ExtensionEventService
         catch (Exception ex)
         {
             LoggingService.Instance.Error($"Failed to trigger event '{eventName}': {ex.Message}");
+        }
+        finally
+        {
+            dispatching.Remove(eventName);
         }
     }
 

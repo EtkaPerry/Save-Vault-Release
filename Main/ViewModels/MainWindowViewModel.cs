@@ -354,7 +354,101 @@ public partial class MainWindowViewModel : ViewModelBase
             // Ensure complete exit
             Environment.Exit(0);
         });
+
+        // Expose games & backups to extensions via the host bridge.
+        RegisterExtensionHostProviders();
     }
+
+    // ---- Extension host integration (games & backups exposed to Lua extensions) ----
+
+    private void RegisterExtensionHostProviders()
+    {
+        var host = Services.ExtensionHostService.Instance;
+        host.GamesProvider = GetGamesJsonForExtensions;
+        host.SavePathProvider = GetSavePathForExtensions;
+        host.BackupsProvider = GetBackupsJsonForExtensions;
+        host.BackupTrigger = TriggerBackupForExtension;
+        host.RestoreTrigger = TriggerRestoreForExtension;
+    }
+
+    private ApplicationInfo? FindAppByName(string appName) =>
+        AllInstalledApps.FirstOrDefault(a => string.Equals(a.Name, appName, StringComparison.OrdinalIgnoreCase));
+
+    private string GetGamesJsonForExtensions()
+    {
+        var list = AllInstalledApps.Select(a => new Dictionary<string, object?>
+        {
+            ["name"] = a.Name,
+            ["savePath"] = a.SavePath,
+            ["executable"] = a.ExecutablePath,
+            ["lastBackup"] = a.LastBackupTime == default ? null : a.LastBackupTime.ToString("o")
+        }).ToList();
+        return System.Text.Json.JsonSerializer.Serialize(list);
+    }
+
+    private string GetSavePathForExtensions(string appName) => FindAppByName(appName)?.SavePath ?? "";
+
+    private string GetBackupsJsonForExtensions(string appName)
+    {
+        var app = FindAppByName(appName);
+        if (app == null) return "[]";
+        var list = app.BackupHistory.Select(b => new Dictionary<string, object?>
+        {
+            ["path"] = b.BackupPath,
+            ["description"] = b.Description,
+            ["timestamp"] = b.Timestamp.ToString("o"),
+            ["isAuto"] = b.IsAutoBackup
+        }).ToList();
+        return System.Text.Json.JsonSerializer.Serialize(list);
+    }
+
+    private bool TriggerBackupForExtension(string appName)
+    {
+        var app = FindAppByName(appName);
+        if (app == null) return false;
+        Avalonia.Threading.Dispatcher.UIThread.Invoke(() => CreateBackup(app, force: true));
+        return true;
+    }
+
+    private bool TriggerRestoreForExtension(string appName, string backupPath)
+    {
+        var app = FindAppByName(appName);
+        var backup = app?.BackupHistory.FirstOrDefault(b => string.Equals(b.BackupPath, backupPath, StringComparison.OrdinalIgnoreCase));
+        if (app == null || backup == null) return false;
+        Avalonia.Threading.Dispatcher.UIThread.Invoke(() => PerformRestore(app, backup));
+        return true;
+    }
+
+    /// <summary>Fire an extension event with a JSON payload, marshaling to the UI thread.</summary>
+    private void FireExtensionEvent(string eventName, object payload)
+    {
+        void Fire()
+        {
+            try
+            {
+                var json = payload as string ?? System.Text.Json.JsonSerializer.Serialize(payload);
+                Services.ExtensionEventService.Instance.TriggerEvent(eventName, json);
+            }
+            catch (Exception ex)
+            {
+                Services.LoggingService.Instance?.Warning($"Failed to dispatch extension event '{eventName}': {ex.Message}");
+            }
+        }
+
+        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+            Fire();
+        else
+            Avalonia.Threading.Dispatcher.UIThread.Post(Fire);
+    }
+
+    private void NotifyBackupCreated(ApplicationInfo app, string backupPath, bool isAuto) =>
+        FireExtensionEvent("saves.backup.created", new
+        {
+            app = app.Name,
+            path = backupPath,
+            auto = isAuto,
+            time = DateTime.Now.ToString("o")
+        });
 
     // Add a method to initialize the application search
     public void InitializeApplicationSearch()
@@ -490,7 +584,7 @@ public partial class MainWindowViewModel : ViewModelBase
             Debug.WriteLine($"Error during automatic backup check: {ex.Message}");
         }
     }
-      private void CreateBackup(ApplicationInfo app)
+      private void CreateBackup(ApplicationInfo app, bool force = false)
     {
         try
         {
@@ -503,7 +597,8 @@ public partial class MainWindowViewModel : ViewModelBase
                 ? app.CustomSettings.AutoSaveEnabled
                 : _settings.GlobalAutoSaveEnabled;
 
-            if (!shouldAutoSave)
+            // A forced backup (e.g. triggered by an extension) ignores the auto-save toggle.
+            if (!force && !shouldAutoSave)
                 return;
 
             // Get all files in the save directory for change detection
@@ -513,8 +608,8 @@ public partial class MainWindowViewModel : ViewModelBase
             bool changeDetectionEnabled = app.HasCustomSettings
                 ? app.CustomSettings.ChangeDetectionEnabled
                 : _settings.ChangeDetectionEnabled;
-                  // Use change detection if enabled
-            if (changeDetectionEnabled)
+                  // Use change detection if enabled (a forced backup always proceeds)
+            if (!force && changeDetectionEnabled)
             {
                 Debug.WriteLine($"Change detection enabled for {app.Name}, checking {saveFiles.Length} files...");                // Check if there are changes since last backup - pass app-specific settings if available
                 bool hasChanges = Utilities.FileChangeDetector.HaveFilesChanged(
@@ -653,8 +748,8 @@ public partial class MainWindowViewModel : ViewModelBase
                 {
                     BackupPath = backupFolder,
                     Timestamp = backupTimestamp,
-                    Description = $"Auto save ({timestamp})",
-                    IsAutoBackup = true
+                    Description = force ? $"Manual backup ({timestamp})" : $"Auto save ({timestamp})",
+                    IsAutoBackup = !force
                 };
                 
                 // Create backup info for settings (using Model's SaveBackupInfo)
@@ -671,7 +766,10 @@ public partial class MainWindowViewModel : ViewModelBase
                   // Update the last backup time in _appData *before* saving
                 _appData.LastBackupTimes[app.ExecutablePath] = backupTimestamp;
                 _appData.Save();
-                
+
+                // Let extensions react to the new backup.
+                NotifyBackupCreated(app, backupFolder, isAuto: !force);
+
                 // Add to history on UI thread
                 Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                 {
@@ -1138,12 +1236,14 @@ public partial class MainWindowViewModel : ViewModelBase
                                         InstalledApps.Add(app);                                    // Save to AppData cache for next time
                                     if (!_appData.KnownApplicationPaths.Contains(app.ExecutablePath))
                                     {
+                                        // Persisting per app (_appData.Save) wrote the whole
+                                        // cache to disk on every discovery hit and froze the
+                                        // UI; the paths are saved once when the scan completes.
                                         _appData.KnownApplicationPaths.Add(app.ExecutablePath);
-                                        // Save AppData to persist the new app path
-                                        _appData.Save();
                                     }
 
-                                    ApplySort();
+                                    // ApplySort() also ran here per app (a full clear/re-add of
+                                    // the list each hit); the list is sorted once at the end now.
                                     // Update status message with progress
                                     int total = AllInstalledApps.Count;
                                     StatusMessage = $"Found {total} programs so far...";
@@ -1206,7 +1306,13 @@ public partial class MainWindowViewModel : ViewModelBase
                 if (cancellationToken.IsCancellationRequested)
                     return;
                     
+                ApplySort();
                 IsLoading = false;
+
+                // Persist the discovered app paths to disk once, now that the scan
+                // is complete (instead of once per app during discovery).
+                _appData.Save();
+
                   // Count final stats
                 int totalPrograms = AllInstalledApps.Count;
                 int withSaveLocations = AllInstalledApps.Count(app => !string.IsNullOrEmpty(app.SavePath) && app.SavePath != "Unknown");
@@ -1217,7 +1323,9 @@ public partial class MainWindowViewModel : ViewModelBase
                 Debug.WriteLine(statusMessage);
                   // Log to the log viewer
                 string logMessage = $"Application scan completed: {totalPrograms} programs, {withSaveLocations} with save location";
-                Services.LoggingService.Instance.Info(logMessage);                // Log only known games with no save location to reduce log noise
+                Services.LoggingService.Instance.Info(logMessage);
+                FireExtensionEvent("games.scan.completed", new { total = totalPrograms, withSaveLocations });
+                // Log only known games with no save location to reduce log noise
                 var knownGamesWithNoSaveLocation = AllInstalledApps
                     .Where(app => (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown"))
                     // Only include apps that match a known game in KnownGames.cs
@@ -1255,7 +1363,11 @@ public partial class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        // 1. Instantly show all known apps (no file existence check)
+        // 1. Show all known apps from the cache. The heavy per-app work (display-name
+        //    resolution, KnownGames matching, backup-history restore, folder I/O) runs
+        //    on a background thread and is collected into a plain list; the bound
+        //    collections are then filled on the UI thread in small batches so the
+        //    window never freezes ("Not Responding") while the cache loads.
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
             IsLoading = true;
@@ -1264,18 +1376,23 @@ public partial class MainWindowViewModel : ViewModelBase
             InstalledApps.Clear();
             HiddenGames.Clear();
             AllInstalledApps.Clear();
+        });
 
-                        // Prioritize AppData over older locations
-            IEnumerable<string> knownPaths;
-            if (_appData.KnownApplicationPaths != null && _appData.KnownApplicationPaths.Count > 0)
-            {
-                knownPaths = _appData.KnownApplicationPaths;
-            }
-            else
-            {
-                knownPaths = _settings.KnownApplicationPaths;
-            }
+        // Prioritize AppData over older locations
+        IEnumerable<string> knownPaths;
+        if (_appData.KnownApplicationPaths != null && _appData.KnownApplicationPaths.Count > 0)
+        {
+            knownPaths = _appData.KnownApplicationPaths;
+        }
+        else
+        {
+            knownPaths = _settings.KnownApplicationPaths;
+        }
 
+        // Build the ApplicationInfo objects off the UI thread so the window stays responsive.
+        var builtApps = new List<ApplicationInfo>();
+        await Task.Run(() =>
+        {
             foreach (var exePath in knownPaths)
             {
                 var appName = AppIdentity.ResolveDisplayName(exePath);
@@ -1363,12 +1480,38 @@ public partial class MainWindowViewModel : ViewModelBase
 
                 LoadAppSettings(app);
 
-                AllInstalledApps.Add(app);
-                if (app.IsHidden)
-                    HiddenGames.Add(app);
-                else
-                    InstalledApps.Add(app);
+                builtApps.Add(app);
             }
+        });
+
+        // 2. Commit the built apps to the bound collections on the UI thread in
+        //    small batches, yielding to the dispatcher between each batch so the
+        //    window stays responsive and the list fills in progressively.
+        const int uiBatchSize = 100;
+        for (int i = 0; i < builtApps.Count; i += uiBatchSize)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                break;
+
+            var batch = builtApps.GetRange(i, Math.Min(uiBatchSize, builtApps.Count - i));
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                foreach (var app in batch)
+                {
+                    AllInstalledApps.Add(app);
+                    if (app.IsHidden)
+                        HiddenGames.Add(app);
+                    else
+                        InstalledApps.Add(app);
+                }
+                StatusMessage = $"Loading applications... ({AllInstalledApps.Count}/{builtApps.Count})";
+            });
+        }
+
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            if (cancellationToken.IsCancellationRequested)
+                return;
             
             ApplySort();
             IsLoading = false;
@@ -1384,7 +1527,8 @@ public partial class MainWindowViewModel : ViewModelBase
               // Log to the log viewer with additional details about apps with no save location
             string logMessage = $"Application scan completed: {totalPrograms} programs, {withSaveLocations} with save location";
             Services.LoggingService.Instance.Info(logMessage);
-            
+            FireExtensionEvent("games.scan.completed", new { total = totalPrograms, withSaveLocations });
+
             // Log only known games with no save location to reduce log noise
             var knownAppsWithNoSaveLocation = AllInstalledApps
                 .Where(app => (string.IsNullOrEmpty(app.SavePath) || app.SavePath == "Unknown"))
@@ -1422,7 +1566,7 @@ public partial class MainWindowViewModel : ViewModelBase
             }
         });
 
-        // 2. Start background scan to validate and update the list
+        // 3. Start background scan to validate and update the list
         StartBackgroundAppRefresh();
     }
     
@@ -2808,6 +2952,9 @@ public partial class MainWindowViewModel : ViewModelBase
 
         logger.Info($"Restored '{app.Name}' from backup {backup.Timestamp:g} ({restore.FilesCopied} file(s)).");
         StatusMessage = $"Restored save from {backup.Description}";
+
+        // Let extensions react to the restore.
+        FireExtensionEvent("saves.restored", new { app = app.Name, fromBackup = backup.BackupPath, files = restore.FilesCopied });
     }
 
     /// <summary>Restores the live save from the pre-restore safety copy after a failed restore.</summary>
@@ -2853,6 +3000,9 @@ public partial class MainWindowViewModel : ViewModelBase
         });
 
         _settings.Save();
+
+        // Let extensions react to the new backup (covers manual / pre-restore safety backups).
+        NotifyBackupCreated(app, backupFolder, isAutoBackup);
     }
 
     [RelayCommand]
@@ -3884,7 +4034,10 @@ public partial class MainWindowViewModel : ViewModelBase
             // Add to collections
             AllInstalledApps.Add(app);
             InstalledApps.Add(app);
-              
+
+            // Let extensions react to the newly added game/app.
+            FireExtensionEvent("games.added", new { name = app.Name, savePath = app.SavePath, executable = app.ExecutablePath });
+
             // Add to known applications in AppData
             _appData.KnownApplicationPaths.Add(app.ExecutablePath);
             _appData.Save();

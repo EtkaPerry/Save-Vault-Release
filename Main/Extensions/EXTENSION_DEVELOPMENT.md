@@ -6,9 +6,7 @@ SaveVault supports Lua-based extensions that can modify the application's behavi
 
 ## Extension Structure
 
-Each extension must have the following 5. Test extension loading/unloading from the extension manager
-6. Test menu items and UI interactions
-7. Test with different languagesucture:
+Each extension is a folder with the following structure:
 ```
 extension-folder/
 ├── manifest.json    # Extension metadata and configuration
@@ -29,10 +27,32 @@ extension-folder/
   "main": "main.lua",
   "minimumVersion": "0.2.8",
   "tags": ["theme", "dark", "utility"],
+  "permissions": ["network", "files", "clipboard", "backups", "games"],
   "createdDate": "2024-12-19T00:00:00Z",
   "updatedDate": "2024-12-19T00:00:00Z"
 }
 ```
+
+### Permissions
+
+`permissions` declares the sensitive capabilities your extension needs. The host enforces it at
+the API boundary — calls to a capability you didn't request are blocked and logged.
+
+| Permission  | Unlocks                                                        |
+|-------------|---------------------------------------------------------------|
+| `network`   | `httpRequest`, `openUrl`                                       |
+| `files`     | `readExtensionFile`, `writeExtensionFile`                     |
+| `clipboard` | `copyToClipboard`                                             |
+| `backups`   | `getBackups`, `createBackupNow`, `restoreBackup`             |
+| `games`     | `getGames`, `getSavePath`                                     |
+
+Capabilities that are *not* in the table (logging, settings, translations, events, menus, windows,
+notifications, theming) are always available and need no declaration.
+
+**Back-compat:** if you omit `permissions` entirely, your extension keeps the capabilities that
+existed before this model (network/files/clipboard) — but the newer `backups` and `games` APIs
+*always* require an explicit declaration. As soon as you add a `permissions` array, it is enforced
+strictly: only what you list is granted. Official/built-in extensions are trusted with everything.
 
 ## Extension API
 
@@ -54,12 +74,34 @@ setSetting(key, value)           -- Set extension setting
 ### UI Functions (Enhanced)
 ```lua
 addMenuItem(menuName, itemText, tooltip)  -- Add menu item
-addButton(location, buttonText, tooltip)  -- Add button to main UI (future)
+addButton(location, buttonText, callbackFunction, tooltip) -- Add a status-bar button; click calls callbackFunction(buttonText)
 createWindow(title, width, height)        -- Create new custom window
 addLabel(windowTitle, text)               -- Add text label to custom window
 addWindowButton(windowTitle, text, callback) -- Add button to custom window
 addTextBox(windowTitle, name, placeholder) -- Add text input to custom window
 local value = getControlValue(windowTitle, controlName) -- Get value from control
+```
+
+### Host Data Functions (games & backups)
+```lua
+local gamesJson = getGames()                  -- JSON array: {name, savePath, executable, lastBackup}   [requires "games"]
+local path = getSavePath(gameName)            -- Save folder for a game ("" if unknown)                 [requires "games"]
+local backupsJson = getBackups(gameName)      -- JSON array: {path, description, timestamp, isAuto}      [requires "backups"]
+local ok = createBackupNow(gameName)          -- Force an immediate backup of a game                     [requires "backups"]
+local ok = restoreBackup(gameName, backupPath)-- Restore a game from a specific backup path              [requires "backups"]
+```
+
+### JSON Helper
+A small `json` library is always available so you can work with the JSON payloads carried by host
+events and the host-data functions:
+```lua
+local data  = json.decode(jsonString)   -- JSON string -> Lua table (nil on empty/invalid input)
+local text  = json.encode(luaTable)     -- Lua table -> JSON string
+
+local games = json.decode(getGames())
+for _, g in ipairs(games) do
+    logInfo(g.name .. " -> " .. g.savePath)
+end
 ```
 
 ### System Functions (NEW!)
@@ -98,25 +140,38 @@ currentExtensionName    -- Current extension name
 currentExtensionVersion -- Current extension version
 ```
 
-## System Events (NEW!)
+## System Events
 
-Extensions can subscribe to these predefined system events:
+Subscribe with `subscribeToEvent(eventName, "yourCallback")`. Your callback is invoked as
+`callback(eventName, data)`. For events whose data is JSON, parse it with `json.decode(data)`.
 
-- `app.startup` - Application startup
-- `app.shutdown` - Application shutdown
-- `app.language.changed` - Language changed
-- `app.settings.changed` - Settings changed
-- `app.window.opened` - Window opened
-- `app.window.closed` - Window closed
-- `extension.installed` - Extension installed
-- `extension.uninstalled` - Extension uninstalled
-- `extension.enabled` - Extension enabled
-- `extension.disabled` - Extension disabled
-- `games.scan.completed` - Game scan completed
-- `games.added` - Game added
-- `games.removed` - Game removed
-- `saves.backup.created` - Save backup created
-- `saves.restored` - Save restored
+**Events the host fires:**
+
+| Event                    | `data` payload                                         |
+|--------------------------|--------------------------------------------------------|
+| `app.startup`            | (none) — fired once after extensions finish loading    |
+| `app.shutdown`           | (none) — fired when the app is closing (best effort)   |
+| `app.language.changed`   | language code string, e.g. `"en-US"`                   |
+| `app.theme.changed`      | theme string: `"Light"`, `"Dark"` or `"System"`        |
+| `extension.installed`    | JSON `{id, name, version}`                              |
+| `extension.uninstalled`  | JSON `{id, name, version}`                              |
+| `extension.enabled`      | JSON `{id, name, version}`                              |
+| `extension.disabled`     | JSON `{id, name, version}`                              |
+| `games.scan.completed`   | JSON `{total, withSaveLocations}`                       |
+| `games.added`            | JSON `{name, savePath, executable}`                     |
+| `saves.backup.created`   | JSON `{app, path, auto, time}`                          |
+| `saves.restored`         | JSON `{app, fromBackup, files}`                         |
+
+```lua
+function onBackup(eventName, data)
+    local b = json.decode(data)
+    logInfo("Backed up " .. b.app .. " -> " .. b.path .. " (auto=" .. tostring(b.auto) .. ")")
+end
+subscribeToEvent("saves.backup.created", "onBackup")
+```
+
+**Reserved (not emitted by the host yet, but you may `triggerEvent` them for your own use):**
+`app.settings.changed`, `app.window.opened`, `app.window.closed`, `games.removed`.
 
 ## Extension Callbacks (NEW!)
 
@@ -248,6 +303,45 @@ end
 ```
 
 ## Extension Examples
+
+### Backup Companion (events + host data + permissions)
+
+A complete example using the new modding capabilities. Its `manifest.json` declares:
+```json
+{ "id": "example.backup-companion", "name": "Backup Companion", "version": "1.0.0",
+  "author": "You", "category": "Other", "main": "main.lua",
+  "permissions": ["backups", "games"] }
+```
+```lua
+function onLoad()
+    logInfo("Backup Companion loaded")
+
+    -- A status-bar button that backs up the currently selected-ish game on demand.
+    addButton("statusbar", "Backup First Game", "bc_onBackupClick", "Back up the first detected game")
+
+    -- React whenever ANY backup is created.
+    subscribeToEvent("saves.backup.created", "bc_onBackup")
+end
+
+function bc_onBackup(eventName, data)
+    local b = json.decode(data)
+    if b then
+        showNotification("Backup created", b.app .. " (" .. (b.auto and "auto" or "manual") .. ")", "success")
+    end
+end
+
+function bc_onBackupClick(buttonText)
+    local games = json.decode(getGames())          -- requires "games"
+    if games and games[1] then
+        local ok = createBackupNow(games[1].name)  -- requires "backups"
+        logInfo("Manual backup of " .. games[1].name .. ": " .. tostring(ok))
+    end
+end
+
+function onUnload()
+    unsubscribeFromEvent("saves.backup.created")
+end
+```
 
 ### Comprehensive UI Extension
 ```lua
@@ -402,12 +496,31 @@ end
 
 ## Security Considerations
 
-Extensions run in a sandboxed environment with the following restrictions:
-- No access to system files outside the extension directory
-- No network access (except future approved APIs)
-- Limited to approved API functions
-- Cannot execute system commands
-- UI modifications are controlled and safe
+Extensions run in a restricted environment:
+- **Capability permissions** — sensitive APIs (network, files, clipboard, backups, games) are
+  gated by the `permissions` you declare in the manifest (see *Permissions* above). Undeclared
+  calls are blocked and logged.
+- **File sandbox** — `readExtensionFile`/`writeExtensionFile` are confined to your extension's own
+  folder; path traversal (`..\..`) is rejected.
+- **URL restrictions** — `httpRequest` allows only `http`/`https`; `openUrl` allows only
+  `http`/`https`/`mailto` (no `file:`, no launching local executables).
+- **Execution watchdog** — a script or callback that runs too long (e.g. an accidental infinite
+  loop) is aborted automatically after ~5 seconds, so a bad extension can't freeze the app. Note
+  this interrupts Lua execution only, not time spent waiting on a host call.
+- **Limited API surface** — only the documented functions are available (no `os`, `io`, `require`,
+  or arbitrary .NET access).
+
+### Important: extensions share one Lua state
+
+All enabled extensions currently run in a single shared Lua environment. That means a *global*
+function defined by one extension can be overwritten by another that uses the same name. To avoid
+collisions:
+- **Give your callbacks unique, namespaced names** — e.g. `myext_onBackup` instead of `onBackup`,
+  `myext_onClick` instead of a generic name. Pass these names to `subscribeToEvent`, `addButton`,
+  and `addWindowButton`.
+- The lifecycle functions `onLoad`, `onUnload`, `onMenuItemClick`, and (for themes) `applyTheme`
+  are looked up by their fixed names — keep their bodies guarded with `pcall` and avoid assuming
+  no other extension touches the same globals.
 
 ## Testing Extensions
 

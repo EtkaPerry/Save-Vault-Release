@@ -53,7 +53,7 @@ namespace SaveVaultApp.Services
         
         private readonly Settings _settings;
         private readonly HttpClient _httpClient;
-        private readonly string _notificationsUrl = "https://etka.helioho.st/notifications_api.php";
+        private readonly string _notificationsUrl = "https://vault.etka.co.uk/notifications_api.php";
         private readonly string _storageFolder;
         private readonly string _notificationsFile = "notifications.json";
         

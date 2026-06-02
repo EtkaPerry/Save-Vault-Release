@@ -22,6 +22,7 @@ public class ExtensionCategoryConverter : JsonConverter<ExtensionCategory>
                 "fixes" => ExtensionCategory.Fixes,
                 "localization" => ExtensionCategory.Localization,
                 "theming" => ExtensionCategory.Theming,
+                "official" => ExtensionCategory.Official,
                 _ => ExtensionCategory.Other
             };
         }
@@ -41,6 +42,7 @@ public class ExtensionCategoryConverter : JsonConverter<ExtensionCategory>
             ExtensionCategory.Fixes => "Fixes",
             ExtensionCategory.Localization => "Localization",
             ExtensionCategory.Theming => "Theming",
+            ExtensionCategory.Official => "Official",
             _ => "Other"
         };
         writer.WriteStringValue(categoryString);
@@ -123,7 +125,18 @@ public class Extension : INotifyPropertyChanged
     
     [JsonPropertyName("isOfficial")]
     public bool IsOfficial { get; set; } = false;
-    
+
+    /// <summary>
+    /// Capabilities the extension's manifest declares it needs (e.g. "network", "files",
+    /// "backups", "games", "clipboard"). A <c>null</c> value means the manifest did not declare a
+    /// <c>permissions</c> key at all — i.e. a legacy extension, granted the historically-available
+    /// capabilities for back-compat. A non-null (possibly empty) list means the author explicitly
+    /// declared the capability set, which is then enforced strictly. See
+    /// <see cref="Services.ExtensionService.HasPermission"/>.
+    /// </summary>
+    [JsonPropertyName("permissions")]
+    public List<string>? Permissions { get; set; }
+
     [JsonIgnore]
     public bool IsInstalled
     {
@@ -174,8 +187,9 @@ public class Extension : INotifyPropertyChanged
     public string CategoryDisplayName => Category switch
     {
         ExtensionCategory.Fixes => "Fixes",
-        ExtensionCategory.Localization => "Localization", 
+        ExtensionCategory.Localization => "Localization",
         ExtensionCategory.Theming => "Theming",
+        ExtensionCategory.Official => "Official",
         ExtensionCategory.Other => "Other",
         _ => "All"
     };
@@ -199,5 +213,6 @@ public enum ExtensionCategory
     Fixes = 1,
     Localization = 2,
     Theming = 3,
-    Other = 4
+    Other = 4,
+    Official = 5
 }

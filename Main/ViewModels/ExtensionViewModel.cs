@@ -147,11 +147,23 @@ public partial class ExtensionViewModel : ViewModelBase
     public bool IsDownloadTab => CurrentTab == "download";
     public bool IsInstalledTab => CurrentTab == "installed";
 
-    public List<ExtensionCategory> Categories { get; } = Enum.GetValues<ExtensionCategory>().ToList();    public string CategoryDisplayName => 
+    // Explicit order (Official listed first among real categories) rather than enum order.
+    public List<ExtensionCategory> Categories { get; } = new()
+    {
+        ExtensionCategory.All,
+        ExtensionCategory.Official,
+        ExtensionCategory.Fixes,
+        ExtensionCategory.Localization,
+        ExtensionCategory.Theming,
+        ExtensionCategory.Other
+    };
+
+    public string CategoryDisplayName =>
         CurrentTab == "download" 
             ? (SelectedCategory switch
             {
                 ExtensionCategory.All => "Download Extensions",
+                ExtensionCategory.Official => "Official Extensions",
                 ExtensionCategory.Fixes => "Bug Fixes",
                 ExtensionCategory.Localization => "Localization",
                 ExtensionCategory.Theming => "Themes",

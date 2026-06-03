@@ -4,23 +4,12 @@
  * Admin interface for managing extensions
  */
 
-// Disable error display to prevent HTML output
-ini_set('display_errors', 0);
-error_reporting(E_ALL);
+require_once __DIR__ . '/security.php';
+sv_init_api('GET, POST, OPTIONS'); // error handling, JSON headers, CORS allow-list, preflight
 
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db_handler.php';
 require_once __DIR__ . '/jwt_helper.php';
-
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-
-// Handle preflight requests
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    exit(0);
-}
 
 class ExtensionsAdminAPI {
     private $db;
@@ -36,7 +25,7 @@ class ExtensionsAdminAPI {
             
         } catch (Exception $e) {
             error_log("ExtensionsAdminAPI constructor error: " . $e->getMessage());
-            $this->sendError('Database connection failed: ' . $e->getMessage(), 500);
+            $this->sendError('Database connection failed', 500);
             exit;
         }
     }
@@ -74,7 +63,7 @@ class ExtensionsAdminAPI {
             
         } catch (Exception $e) {
             error_log("Extensions Admin API Error: " . $e->getMessage());
-            $this->sendError('Internal server error: ' . $e->getMessage(), 500);
+            $this->sendError('Internal server error', 500);
         }
     }
       /**
@@ -82,33 +71,27 @@ class ExtensionsAdminAPI {
      */
     private function verifyAdminAuth() {
         try {
-            $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-            if (!preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
-                error_log("Admin auth failed: No Bearer token found");
+            // Token from the Authorization header (desktop client) or the HttpOnly
+            // session cookie (web UI).
+            $fromCookie = false;
+            $token = sv_bearer_token($fromCookie);
+            if (!$token) {
                 return false;
             }
-            
-            $token = $matches[1];
-            if (empty($token)) {
-                error_log("Admin auth failed: Empty token");
-                return false;
-            }
-            
+
             $payload = JWT::decode($token);
-            
             if (!$payload) {
-                error_log("Admin auth failed: Invalid JWT token");
                 return false;
             }
-            
+
             if (!isset($payload->admin) || !$payload->admin) {
-                error_log("Admin auth failed: User is not admin. Admin status: " . (isset($payload->admin) ? $payload->admin : 'not set'));
                 return false;
             }
-            
-            error_log("Admin auth successful for user: " . $payload->sub);
+
+            // CSRF guard for cookie-authenticated state-changing requests.
+            sv_csrf_guard($fromCookie);
+
             return true;
-            
         } catch (Exception $e) {
             error_log("Admin auth error: " . $e->getMessage());
             return false;
@@ -206,7 +189,7 @@ class ExtensionsAdminAPI {
             
         } catch (Exception $e) {
             error_log("getExtensionsList error: " . $e->getMessage());
-            $this->sendError('Failed to fetch extensions: ' . $e->getMessage(), 500);
+            $this->sendError('Failed to fetch extensions', 500);
         }
     }
       /**
@@ -324,7 +307,7 @@ class ExtensionsAdminAPI {
             
         } catch (Exception $e) {
             error_log("Sync Extensions Error: " . $e->getMessage());
-            $this->sendError('Sync failed: ' . $e->getMessage(), 500);
+            $this->sendError('Sync failed', 500);
         }
     }
     

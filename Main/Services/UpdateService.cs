@@ -16,6 +16,11 @@ namespace SaveVaultApp.Services
         public string ReleaseNotes { get; set; } = string.Empty;
         public bool ForceUpdate { get; set; } = false;
         public string ReleaseDate { get; set; } = string.Empty;
+
+        // SHA-256 (hex) of the installer published in version.json. Required: the
+        // client verifies the downloaded binary against this before executing it,
+        // so a tampered/MITM'd download cannot be run. Recompute on every release.
+        public string Sha256 { get; set; } = string.Empty;
     }
 
     public class UpdateService
@@ -46,7 +51,9 @@ namespace SaveVaultApp.Services
         public event EventHandler<bool>? UpdateAvailabilityChanged;        private UpdateService()
         {
             _settings = Settings.Load();
-            _httpClient = new HttpClient();
+            // Generous timeout: the large installer download uses ResponseHeadersRead
+            // so the body transfer itself is not bounded by this value.
+            _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(100) };
             
             // Get current version
             var assembly = Assembly.GetExecutingAssembly();
@@ -71,6 +78,30 @@ namespace SaveVaultApp.Services
                 return "macos";
             else
                 return "windows"; // Default to Windows if unknown platform
+        }
+
+        // Only updates served from our own HTTPS host are allowed. This stops a
+        // tampered version.json from pointing the installer at an attacker URL.
+        private const string TrustedUpdateHost = "vault.etka.co.uk";
+
+        private static bool IsTrustedDownloadUrl(string url)
+        {
+            return Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                && uri.Scheme == Uri.UriSchemeHttps
+                && string.Equals(uri.Host, TrustedUpdateHost, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string ComputeSha256(string filePath)
+        {
+            using var stream = File.OpenRead(filePath);
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            return Convert.ToHexString(sha.ComputeHash(stream)); // uppercase hex, no separators
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (Exception ex) { LoggingService.Instance.Warning($"Could not delete temp update file: {ex.Message}"); }
         }
 
         /// <summary>
@@ -199,7 +230,16 @@ namespace SaveVaultApp.Services
                     downloadUrl = $"https://vault.etka.co.uk/download/{platform}/{fileName}";
                     LoggingService.Instance.Warning($"Using default download URL for {platform}: {downloadUrl}");
                 }
-                
+
+                // Refuse to download from anywhere except our own HTTPS host, even if
+                // version.json says otherwise (defends against a tampered manifest).
+                if (!IsTrustedDownloadUrl(downloadUrl))
+                {
+                    LoggingService.Instance.Error($"Refusing update: download URL is not a trusted https://{TrustedUpdateHost} URL: {downloadUrl}");
+                    UpdateStatus("Update blocked: untrusted download location");
+                    return false;
+                }
+
                 UpdateStatus($"Downloading update v{LatestVersion.Version}...");
                 LoggingService.Instance.Info($"Downloading update from: {downloadUrl}");
                 
@@ -247,7 +287,27 @@ namespace SaveVaultApp.Services
                     }
                 }
                 
-                LoggingService.Instance.Info("Update downloaded successfully");
+                // Verify the download's integrity BEFORE we run it. This is the
+                // control that prevents a malicious/corrupt binary from executing.
+                string expectedHash = (LatestVersion.Sha256 ?? string.Empty).Trim().Replace("-", "");
+                if (string.IsNullOrEmpty(expectedHash))
+                {
+                    LoggingService.Instance.Error("Refusing update: no SHA-256 published in version.json — cannot verify integrity.");
+                    UpdateStatus("Update blocked: integrity data missing");
+                    TryDeleteFile(updateFilePath);
+                    return false;
+                }
+
+                string actualHash = ComputeSha256(updateFilePath);
+                if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    LoggingService.Instance.Error($"Refusing update: SHA-256 mismatch (expected {expectedHash}, got {actualHash}). The download may be corrupt or tampered with.");
+                    UpdateStatus("Update blocked: integrity check failed");
+                    TryDeleteFile(updateFilePath);
+                    return false;
+                }
+
+                LoggingService.Instance.Info("Update downloaded successfully and integrity verified (SHA-256 match)");
                 UpdateStatus("Update downloaded. Installing...");
                 
                 // Run the updater 
@@ -264,6 +324,16 @@ namespace SaveVaultApp.Services
                     if (string.IsNullOrEmpty(currentExePath))
                     {
                         LoggingService.Instance.Error("Could not determine current executable path");
+                        UpdateStatus("Update installation failed");
+                        return false;
+                    }
+
+                    // The update scripts embed these paths inside quoted strings;
+                    // reject any path containing a double-quote so it cannot break
+                    // out of the quoting and inject extra shell commands.
+                    if (currentExePath.Contains('"') || updateFilePath.Contains('"') || tempDir.Contains('"'))
+                    {
+                        LoggingService.Instance.Error("Refusing update: a file path contains an unsafe double-quote character.");
                         UpdateStatus("Update installation failed");
                         return false;
                     }

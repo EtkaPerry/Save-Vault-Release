@@ -64,7 +64,7 @@ public class ExtensionService
     public event EventHandler<Extension>? ExtensionEnabled;
     public event EventHandler<Extension>? ExtensionDisabled;    private ExtensionService()
     {
-        _httpClient = new HttpClient();
+        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
         _httpClient.DefaultRequestHeaders.Add("User-Agent", "SaveVault-Extension-Manager/1.0");
 
         var configManager = ExtensionConfigManager.Instance;

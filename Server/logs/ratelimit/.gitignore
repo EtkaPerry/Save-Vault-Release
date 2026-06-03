@@ -1,0 +1,3 @@
+# Ignore runtime rate-limit state files, keep the directory.
+*
+!.gitignore

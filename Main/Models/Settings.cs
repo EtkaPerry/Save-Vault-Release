@@ -79,6 +79,12 @@ public class Settings
     }
 
     private string? _authToken;
+
+    /// <summary>
+    /// In-memory auth token used by the app. NOT serialized directly — only the
+    /// encrypted <see cref="ProtectedAuthToken"/> is written to settings.json.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public string? AuthToken
     {
         get => _authToken;
@@ -87,6 +93,19 @@ public class Settings
             _authToken = value;
             QueueSave();
         }
+    }
+
+    /// <summary>
+    /// Encrypted-at-rest persistence of <see cref="AuthToken"/>. Serialized under
+    /// the original "AuthToken" key so an existing plaintext settings.json migrates
+    /// transparently: it is read as legacy plaintext, then re-written encrypted
+    /// (DPAPI on Windows) on the next save.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonPropertyName("AuthToken")]
+    public string? ProtectedAuthToken
+    {
+        get => Services.CredentialProtector.Protect(_authToken);
+        set => _authToken = Services.CredentialProtector.Unprotect(value);
     }
 
     private string _sortOption = "Last Used";
@@ -451,6 +470,19 @@ public class Settings
         set
         {
             _termsAccepted = value;
+            QueueSave();
+        }
+    }
+
+    // Whether the one-time "here are the games we found" results panel has been shown after the
+    // first application scan. Set once the user dismisses that panel so it never reappears.
+    private bool _firstRunGamesShown = false;
+    public bool FirstRunGamesShown
+    {
+        get => _firstRunGamesShown;
+        set
+        {
+            _firstRunGamesShown = value;
             QueueSave();
         }
     }

@@ -4,22 +4,11 @@
  * Serves approved extensions to SaveVault clients
  */
 
-// Disable error display to prevent HTML output
-ini_set('display_errors', 0);
-error_reporting(E_ALL);
+require_once __DIR__ . '/security.php';
+sv_init_api('GET, POST, OPTIONS'); // error handling, JSON headers, CORS allow-list, preflight
 
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db_handler.php';
-
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
-
-// Handle preflight requests
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    exit(0);
-}
 
 class ExtensionsAPI {
     private $db;
@@ -169,8 +158,12 @@ class ExtensionsAPI {
      * Record extension download
      */
     private function recordDownload() {
+        // This endpoint is unauthenticated; throttle it so download counts
+        // cannot be trivially inflated from a single source.
+        sv_rate_limit_or_die('ext_download', 60, 60);
+
         $input = json_decode(file_get_contents('php://input'), true);
-        $extension_id = $input['extension_id'] ?? $_GET['extension_id'] ?? null;
+        $extension_id = (is_array($input) ? ($input['extension_id'] ?? null) : null) ?? $_GET['extension_id'] ?? null;
         
         if (!$extension_id) {
             $this->sendError('Extension ID required', 400);

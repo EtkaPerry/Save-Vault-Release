@@ -73,6 +73,97 @@ namespace SaveVaultApp.Utilities
         };
 
         /// <summary>
+        /// Lower-invariant path fragments that only ever belong to developer tools, runtimes,
+        /// SDKs and OS components — never to a game. Any executable whose full path contains one
+        /// of these is treated as junk. This is what removes the bundled Unix utilities that ship
+        /// with Git for Windows (<c>\Git\usr\bin\rm.exe</c>, <c>pwd.exe</c>, <c>scp.exe</c> …),
+        /// MSYS2/Cygwin trees, the .NET/PowerShell runtimes, and Windows SDKs that otherwise flood
+        /// the application list with hundreds of non-game console programs.
+        /// Compared using the platform separator so a folder must match as a whole segment.
+        /// </summary>
+        private static readonly string[] JunkPathFragments =
+        {
+            @"\git\usr\",
+            @"\git\mingw32\",
+            @"\git\mingw64\",
+            @"\git\cmd\",
+            @"\git\bin\",
+            @"\msys64\",
+            @"\msys32\",
+            @"\msys2\",
+            @"\cygwin\",
+            @"\cygwin64\",
+            @"\dotnet\sdk\",
+            @"\dotnet\shared\",
+            @"\dotnet\host\",
+            @"\powershell\7\",
+            @"\windows kits\",
+            @"\microsoft sdks\",
+            @"\microsoft visual studio\",
+            @"\windows defender\",
+            @"\nodejs\",
+            @"\node_modules\",
+            @"\llvm\bin\",
+            @"\cmake\bin\",
+            @"\python3",
+            @"\windowspowershell\",
+            @"\system32\",
+            @"\syswow64\",
+            @"\winsxs\",
+            @"\driverstore\",
+        };
+
+        /// <summary>
+        /// Lower-invariant filename substrings that mark installers, redistributables, anti-cheat
+        /// shims and crash helpers. These never name an actual game executable, so a Contains match
+        /// is safe. Kept separate from <see cref="ObviousJunkNames"/> (which is exact-match only).
+        /// </summary>
+        private static readonly string[] JunkNameSubstrings =
+        {
+            "unins",            // unins000.exe / uninstall.exe
+            "uninstall",
+            "installer",
+            "vcredist",
+            "vc_redist",
+            "dxsetup",
+            "dxwebsetup",
+            "easyanticheat",
+            "anticheatinstaller",
+            "battleye",
+            "beservice",
+            "redistributable",
+            "crashhandler",
+            "crashreport",
+            "crashpad",
+            "overwolf",         // Overwolf overlay/companion components, not games
+        };
+
+        /// <summary>
+        /// Lower-invariant path fragments that identify a recognised game library / store install
+        /// root. Executables living under one of these are given the benefit of the doubt: the
+        /// console-subsystem heuristic is skipped for them so that the rare console-mode game
+        /// (roguelikes, some emulators) is still listed.
+        /// </summary>
+        private static readonly string[] GameLibraryFragments =
+        {
+            @"\steamapps\common\",
+            @"\steamlibrary\",
+            @"\epic games\",
+            @"\gog galaxy\games\",
+            @"\gog games\",
+            @"\origin games\",
+            @"\ea games\",
+            @"\electronic arts\",
+            @"\ubisoft game launcher\games\",
+            @"\rockstar games\",
+            @"\bethesda.net launcher\games\",
+            @"\blizzard entertainment\",
+            @"\xbox games\",
+            @"\xboxgames\",
+            @"\amazon games\",
+        };
+
+        /// <summary>
         /// Returns true only for executables that are clearly NOT user-facing applications
         /// (browser/runtime helpers, crash handlers, redistributables, runtime hosts).
         /// Conservative by design: when in doubt it returns false so the exe still shows up,
@@ -104,8 +195,217 @@ namespace SaveVaultApp.Utilities
                     return true;
             }
 
+            // Tool / runtime / OS trees that never contain games (Git's bundled Unix tools,
+            // MSYS2, the .NET & PowerShell runtimes, Windows SDKs, …).
+            if (IsJunkPath(exePath))
+                return true;
+
+            // Installer / redistributable / anti-cheat / crash-helper filenames.
+            foreach (var fragment in JunkNameSubstrings)
+            {
+                if (fileName.Contains(fragment, StringComparison.Ordinal))
+                    return true;
+            }
+
+            // Console (CUI) executables are almost always command-line utilities, not games.
+            // Drop them — unless they sit inside a recognised game library, where the rare
+            // console-mode game should still be listed.
+            if (!IsLikelyGameLibraryPath(exePath) && IsConsoleSubsystem(exePath))
+                return true;
+
             return false;
         }
+
+        /// <summary>
+        /// True when the executable lives under a developer-tool / runtime / OS path that never
+        /// contains a game (see <see cref="JunkPathFragments"/>).
+        /// </summary>
+        private static bool IsJunkPath(string exePath)
+        {
+            string lower = exePath.ToLowerInvariant();
+            foreach (var fragment in JunkPathFragments)
+            {
+                if (lower.Contains(fragment, StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// True when the path sits under a recognised game library / store install root
+        /// (see <see cref="GameLibraryFragments"/>). Accepts a full executable path or a directory.
+        /// </summary>
+        public static bool IsLikelyGameLibraryPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return false;
+
+            string lower = path.ToLowerInvariant();
+            foreach (var fragment in GameLibraryFragments)
+            {
+                if (lower.Contains(fragment, StringComparison.Ordinal))
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Reads the PE optional header and returns true if the image's Subsystem is
+        /// IMAGE_SUBSYSTEM_WINDOWS_CUI (a console application). Best-effort and exception-safe:
+        /// any IO/parse problem returns false so a readable-but-odd file is never dropped on a
+        /// false positive. Only a few bytes are read (DOS stub pointer + the Subsystem field).
+        /// </summary>
+        private static bool IsConsoleSubsystem(string exePath)
+        {
+            const int ImageSubsystemWindowsCui = 3;
+            try
+            {
+                using var stream = new FileStream(exePath, FileMode.Open, FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+
+                // 'MZ' DOS signature.
+                Span<byte> buffer = stackalloc byte[4];
+                if (stream.Read(buffer.Slice(0, 2)) != 2 || buffer[0] != 'M' || buffer[1] != 'Z')
+                    return false;
+
+                // e_lfanew (offset to the PE header) lives at 0x3C.
+                stream.Seek(0x3C, SeekOrigin.Begin);
+                if (stream.Read(buffer) != 4)
+                    return false;
+                uint peHeaderOffset = (uint)(buffer[0] | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24));
+
+                // Verify the 'PE\0\0' signature.
+                stream.Seek(peHeaderOffset, SeekOrigin.Begin);
+                if (stream.Read(buffer) != 4 || buffer[0] != 'P' || buffer[1] != 'E' || buffer[2] != 0 || buffer[3] != 0)
+                    return false;
+
+                // Subsystem is a UInt16 at a fixed offset within the optional header, identical for
+                // PE32 and PE32+: PE sig (4) + COFF header (20) + 68 = peHeaderOffset + 92.
+                stream.Seek(peHeaderOffset + 92, SeekOrigin.Begin);
+                if (stream.Read(buffer.Slice(0, 2)) != 2)
+                    return false;
+                int subsystem = buffer[0] | (buffer[1] << 8);
+
+                return subsystem == ImageSubsystemWindowsCui;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Returns a stable "install root" key for an executable, used to collapse the many
+        /// executables that ship inside a single game/app folder down to one list entry. When the
+        /// path runs through a known library (…\steamapps\common\&lt;Game&gt;\…, …\Epic Games\
+        /// &lt;Game&gt;\…, etc.) the first folder under that library is returned; otherwise the
+        /// executable's own directory is used. Always lower-invariant with no trailing separator.
+        /// </summary>
+        public static string GameRootFolder(string exePath)
+        {
+            if (string.IsNullOrWhiteSpace(exePath))
+                return string.Empty;
+
+            try
+            {
+                string directory = Path.GetDirectoryName(exePath) ?? exePath;
+                string normalized = directory.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+                string lower = normalized.ToLowerInvariant();
+
+                foreach (var fragment in GameLibraryFragments)
+                {
+                    int idx = lower.IndexOf(fragment, StringComparison.Ordinal);
+                    if (idx < 0)
+                        continue;
+
+                    int rootStart = idx + fragment.Length;
+                    if (rootStart >= normalized.Length)
+                        continue;
+
+                    int nextSep = normalized.IndexOf(Path.DirectorySeparatorChar, rootStart);
+                    string root = nextSep < 0 ? normalized : normalized.Substring(0, nextSep);
+                    return root.TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant();
+                }
+
+                // Not under a known library: climb out of binary-only subfolders (…\Binaries\
+                // Win64, …\bin\x64, …) so an engine exe buried a few levels down collapses with the
+                // launcher next to it. The climb stops at the first "real" folder name, so sibling
+                // products under a shared vendor folder are NOT merged.
+                string current = normalized;
+                for (int i = 0; i < 3; i++)
+                {
+                    string leaf = Path.GetFileName(current).ToLowerInvariant();
+                    if (!BinarySubfolderNames.Contains(leaf))
+                        break;
+
+                    string? parent = Path.GetDirectoryName(current);
+                    if (string.IsNullOrEmpty(parent))
+                        break;
+                    current = parent;
+                }
+
+                string candidate = current.TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant();
+
+                // Never collapse by a shared "catch-all" folder (Desktop, Downloads, Documents,
+                // a Program Files root, a drive root): several unrelated games can live loose in
+                // those, so fall back to the full executable path and keep each as its own entry.
+                if (IsCatchAllFolder(candidate))
+                    return exePath.ToLowerInvariant();
+
+                return candidate;
+            }
+            catch
+            {
+                return exePath.ToLowerInvariant();
+            }
+        }
+
+        private static readonly HashSet<string> CatchAllFolders = BuildCatchAllFolders();
+
+        private static HashSet<string> BuildCatchAllFolders()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            void Add(string? p)
+            {
+                if (!string.IsNullOrEmpty(p))
+                    set.Add(p.TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
+            }
+
+            try
+            {
+                Add(Environment.GetFolderPath(Environment.SpecialFolder.Desktop));
+                Add(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+                Add(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+                Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"));
+                Add(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles));
+                Add(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86));
+            }
+            catch
+            {
+                // Best effort: any folder we fail to resolve simply isn't treated as catch-all.
+            }
+
+            return set;
+        }
+
+        private static bool IsCatchAllFolder(string normalizedLowerDir)
+        {
+            if (CatchAllFolders.Contains(normalizedLowerDir))
+                return true;
+
+            // A drive root such as "d:" (after trimming the trailing separator).
+            return normalizedLowerDir.Length <= 3 && normalizedLowerDir.EndsWith(":", StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Folder names that only ever hold build output / binaries, used by
+        /// <see cref="GameRootFolder"/> to climb up to the real install folder. Deliberately
+        /// excludes ambiguous names like "game"/"data" that could merge distinct products.
+        /// </summary>
+        private static readonly HashSet<string> BinarySubfolderNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "bin", "binaries", "win64", "win32", "win", "x64", "x86", "x86_64", "release", "retail"
+        };
 
         /// <summary>
         /// Best-effort human-friendly display name for an executable. Never throws and never

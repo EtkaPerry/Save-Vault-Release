@@ -11,18 +11,12 @@
  * - Account management
  */
 
-require_once 'config.php';
-require_once 'db.php';
-require_once 'jwt_helper.php';
+require_once __DIR__ . '/security.php';
+sv_init_api('GET, POST, PUT, DELETE, OPTIONS'); // error handling, JSON headers, CORS allow-list, preflight
 
-// Set headers to allow cross-origin requests and specify content type
-header('Access-Control-Allow-Origin: *');
-header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-header('Access-Control-Max-Age: 86400'); // Cache preflight response for 24 hours
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/jwt_helper.php';
 
 /**
  * Get Authorization header from various sources
@@ -54,37 +48,56 @@ function getAuthHeaderFromRequest() {
             $auth = $requestHeaders['authorization'];
         }
     }
-    // Method 5: Check cookies as fallback
-    elseif (isset($_COOKIE['token'])) {
-        $auth = 'Bearer ' . $_COOKIE['token'];
-    }    elseif (isset($_COOKIE['auth_token'])) {
-        $auth = 'Bearer ' . $_COOKIE['auth_token'];
+    if ($auth !== null && $auth !== '') {
+        $GLOBALS['sv_auth_from_cookie'] = false;
+        return $auth;
     }
-    // Method 6: Check query string as last resort - REMOVED FOR SECURITY
-    // This method was removed because tokens in URLs can be logged in server logs
-    // and browser history, potentially exposing them to security risks
-    
-    return $auth;
+
+    // Web UI fallback: the token is kept in an HttpOnly, Secure, SameSite=Strict
+    // cookie that JavaScript cannot read, so the browser sends it automatically.
+    // This is safe against CSRF because (a) SameSite=Strict stops the cookie being
+    // sent on cross-site requests, and (b) authenticateRequest() additionally
+    // requires an X-Requested-With header for cookie-authenticated state-changing
+    // methods. Query-string tokens remain unsupported (they leak via logs/history).
+    if (!empty($_COOKIE['auth_token'])) {
+        $GLOBALS['sv_auth_from_cookie'] = true;
+        return 'Bearer ' . $_COOKIE['auth_token'];
+    }
+
+    return null;
 }
 
-// Handle preflight OPTIONS request
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
+/**
+ * Set the website session cookie holding the JWT. HttpOnly (not script-readable,
+ * mitigates XSS token theft), Secure (HTTPS only) and SameSite=Strict (CSRF).
+ */
+function sv_set_session_cookie($token, $maxAgeSeconds) {
+    setcookie('auth_token', $token, [
+        'expires'  => $maxAgeSeconds > 0 ? time() + $maxAgeSeconds : 0,
+        'path'     => '/',
+        'secure'   => true,
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
 }
 
-// Get the request URI and method
+/** Expire the website session cookie (server-side logout). */
+function sv_clear_session_cookie() {
+    setcookie('auth_token', '', [
+        'expires'  => time() - 3600,
+        'path'     => '/',
+        'secure'   => true,
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
+}
+
+// Get the request URI and method (preflight already handled by sv_init_api).
 $requestUri = $_SERVER['REQUEST_URI'];
 $requestMethod = $_SERVER['REQUEST_METHOD'];
 
-// Add debugging
-error_log("Request URI: " . $requestUri);
-error_log("REQUEST_METHOD: " . $requestMethod);
-
 // Parse the request path
 $path = parse_url($requestUri, PHP_URL_PATH);
-error_log("Path from parse_url: " . $path);
-error_log("QUERY_STRING: " . $_SERVER['QUERY_STRING']);
 
 // Extract final part of path after auth_api.php/
 if (strpos($path, 'auth_api.php/') !== false) {
@@ -223,10 +236,26 @@ switch ($path) {
             sendResponse(false, 'Method not allowed', null, 405);
         }
         break;
+
+    case 'reset-password':
+        if ($requestMethod === 'POST') {
+            handleResetPassword();
+        } else {
+            sendResponse(false, 'Method not allowed', null, 405);
+        }
+        break;
+
+    case 'logout':
+        if ($requestMethod === 'POST') {
+            handleLogout();
+        } else {
+            sendResponse(false, 'Method not allowed', null, 405);
+        }
+        break;
         
     case 'upload-photo':
         if ($requestMethod === 'POST') {
-            handleProfilePhotoUpload($authHeader);
+            handleProfilePhotoUploadRequest($authHeader);
         } else {
             sendResponse(false, 'Method not allowed', null, 405);
         }
@@ -249,52 +278,55 @@ switch ($path) {
  */
 function handleLogin() {
     // Include IP utility functions
-    require_once 'ip_utils.php';
-    
+    require_once __DIR__ . '/ip_utils.php';
+
+    // Throttle brute-force / credential-stuffing attempts per client IP.
+    sv_rate_limit_or_die('login', 10, 300);
+
     // Get request body
     $data = json_decode(file_get_contents('php://input'), true);
-    
+
     // Validate required fields
-    if (!isset($data['usernameOrEmail']) || !isset($data['password'])) {
+    if (!is_array($data) || !isset($data['usernameOrEmail']) || !isset($data['password'])) {
         sendResponse(false, 'Username/email and password are required', null, 400);
         return;
     }
-    
+
     $usernameOrEmail = $data['usernameOrEmail'];
     $password = $data['password'];
-    
+
     global $db;
-    
-    // Determine if input is email or username
+
+    // Look the user up by email or username. The field name comes from a fixed
+    // whitelist (not user input), so it is safe to interpolate.
     $isEmail = filter_var($usernameOrEmail, FILTER_VALIDATE_EMAIL);
     $field = $isEmail ? 'email' : 'username';
-    
-    // Prepare and execute query
+
     $stmt = $db->prepare("SELECT id, username, email, password, is_admin FROM users WHERE $field = ?");
     $stmt->bind_param('s', $usernameOrEmail);
     $stmt->execute();
     $result = $stmt->get_result();
-    
-    if ($result->num_rows === 0) {
-        // User not found
-        sleep(1); // Delay to prevent timing attacks
-        sendResponse(false, 'Invalid username or password', null, 401);
-        return;
-    }
-    
     $user = $result->fetch_assoc();
-    
-    // Verify password
-    if (!password_verify($password, $user['password'])) {
+
+    // Always perform a password hash comparison, even when the account does not
+    // exist, so the response time does not reveal whether a username/email is
+    // registered (user-enumeration defence). The dummy hash below is a valid
+    // bcrypt hash that no real password will match.
+    $hash = $user['password'] ?? '$2y$10$CZCJTHVUrmMnoCsc8MEaRuUt6IpUvP.571mzyrz2Bj.cz1uE1AfYW';
+    $passwordOk = password_verify($password, $hash);
+
+    if (!$user || !$passwordOk) {
         sendResponse(false, 'Invalid username or password', null, 401);
         return;
     }
     
-    // Generate JWT token
-    $tokenId = base64_encode(random_bytes(32));
+    // Generate JWT token. "Remember me" extends both the token lifetime and the
+    // cookie; otherwise a short 1-hour session is used.
+    $remember = !empty($data['remember']);
     $issuedAt = time();
-    $expire = $issuedAt + 3600; // 1 hour expiry
-    
+    $tokenLifetime = $remember ? (30 * 24 * 3600) : 3600; // 30 days vs 1 hour
+    $expire = $issuedAt + $tokenLifetime;
+
     // Include is_admin status in the JWT token
     $token = generateJWT($user['id'], $user['username'], $issuedAt, $expire, (bool)$user['is_admin']);
     
@@ -339,7 +371,11 @@ function handleLogin() {
             'device' => $deviceInfo['device_type'] . ' (' . $deviceInfo['os'] . ')'
         ]
     ];
-    
+
+    // Set the HttpOnly session cookie used by the website (the token is also in the
+    // body for the desktop client, which authenticates via the Authorization header).
+    sv_set_session_cookie($token, $tokenLifetime);
+
     sendResponse(true, 'Login successful', $responseData);
 }
 
@@ -347,6 +383,9 @@ function handleLogin() {
  * Handle user registration
  */
 function handleRegistration() {
+    // Limit automated mass account creation per client IP.
+    sv_rate_limit_or_die('register', 5, 600);
+
     try {
         // Get request body
         $input = file_get_contents('php://input');
@@ -356,8 +395,8 @@ function handleRegistration() {
         }
         
         $data = json_decode($input, true);
-        if ($data === null) {
-            sendResponse(false, 'Invalid JSON received: ' . json_last_error_msg(), null, 400);
+        if (!is_array($data)) {
+            sendResponse(false, 'Invalid request body', null, 400);
             return;
         }
         
@@ -434,15 +473,16 @@ function handleRegistration() {
         
         // Check if prepare failed
         if ($stmt === false) {
-            sendResponse(false, 'Database prepare error: ' . $db->error, null, 500);
+            error_log('auth_api register prepare error: ' . $db->error);
+            sendResponse(false, 'Registration failed. Please try again later.', null, 500);
             return;
         }
-        
+
         $stmt->bind_param('ssss', $username, $email, $hashedPassword, $ip);
-        
+
         if (!$stmt->execute()) {
-            // Send detailed error message back
-            sendResponse(false, 'Failed to register user: ' . $stmt->error, null, 500);
+            error_log('auth_api register execute error: ' . $stmt->error);
+            sendResponse(false, 'Registration failed. Please try again later.', null, 500);
             return;
         }
         
@@ -468,7 +508,8 @@ function handleRegistration() {
         
         sendResponse(true, 'Registration successful', $responseData, 201);
     } catch (Exception $e) {
-        sendResponse(false, 'Server error: ' . $e->getMessage(), null, 500);
+        error_log('auth_api registration error: ' . $e->getMessage());
+        sendResponse(false, 'An unexpected server error occurred. Please try again later.', null, 500);
     }
 }
 
@@ -849,69 +890,148 @@ function handleUpdateProfile($authHeader) {
  * Handle forgot password request
  */
 function handleForgotPassword() {
+    // Limit abuse of the reset flow per client IP.
+    sv_rate_limit_or_die('forgot', 5, 600);
+
     // Get request body
     $data = json_decode(file_get_contents('php://input'), true);
-    
-    // Validate required fields
-    if (!isset($data['username']) || !isset($data['email'])) {
-        sendResponse(false, 'Username and email are required', null, 400);
+
+    // Email is required; username is accepted but optional (the web form sends email only).
+    if (!is_array($data) || !isset($data['email']) || !filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+        sendResponse(false, 'A valid email address is required', null, 400);
         return;
     }
-    
-    $username = $data['username'];
-    $email = $data['email'];
-    
+
+    $email = trim($data['email']);
+
+    // The same generic response is returned in every branch so the endpoint never
+    // reveals whether an address is registered (account-enumeration defence).
+    $genericMessage = 'If that email is registered, password reset instructions will be sent to it shortly.';
+
     global $db;
-    
-    // Check if user exists with matching username and email
-    $stmt = $db->prepare("SELECT id FROM users WHERE username = ? AND email = ?");
-    $stmt->bind_param('ss', $username, $email);
+
+    $stmt = $db->prepare("SELECT id FROM users WHERE email = ?");
+    $stmt->bind_param('s', $email);
     $stmt->execute();
-    
-    if ($stmt->get_result()->num_rows === 0) {
-        // For security, don't reveal that user doesn't exist
-        sendResponse(true, 'If the information is correct, password reset instructions will be sent to your email');
+    $result = $stmt->get_result();
+
+    if ($result->num_rows === 0) {
+        sendResponse(true, $genericMessage);
         return;
     }
-    
-    // Generate reset token
-    $resetToken = bin2hex(random_bytes(32));
+
+    $user = $result->fetch_assoc();
+
+    // Single-use token: we email the raw token but store only its SHA-256 hash,
+    // so a database read alone cannot be used to take over accounts.
+    $rawToken    = bin2hex(random_bytes(32));
+    $tokenHash   = hash('sha256', $rawToken);
     $tokenExpiry = date('Y-m-d H:i:s', strtotime('+1 hour'));
-    
-    // Store reset token
-    $stmt = $db->prepare("UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE username = ? AND email = ?");
-    $stmt->bind_param('ssss', $resetToken, $tokenExpiry, $username, $email);
+
+    $stmt = $db->prepare("UPDATE users SET reset_token = ?, reset_token_expires = ? WHERE id = ?");
+    $stmt->bind_param('ssi', $tokenHash, $tokenExpiry, $user['id']);
     $stmt->execute();
-    
-    // In a real app, you would send an email here
-    // For this example, we'll just return success message
-    sendResponse(true, 'If the information is correct, password reset instructions will be sent to your email');
+
+    // Build the reset link from the hardcoded public origin (never the Host header).
+    $resetLink = SV_PUBLIC_URL . '/reset-password?token=' . urlencode($rawToken);
+
+    $body = "Hello,\r\n\r\n"
+          . "We received a request to reset the password for your Save Vault account.\r\n\r\n"
+          . "Use the link below to choose a new password (valid for 1 hour):\r\n"
+          . $resetLink . "\r\n\r\n"
+          . "If you did not request this, you can safely ignore this email and your password will stay the same.\r\n\r\n"
+          . "— Save Vault";
+
+    sv_send_mail($email, 'Reset your Save Vault password', $body);
+
+    // Always return the same message regardless of whether mail() succeeded.
+    sendResponse(true, $genericMessage);
+}
+
+/**
+ * Log out: clear the HttpOnly session cookie server-side (JS cannot clear it).
+ */
+function handleLogout() {
+    sv_clear_session_cookie();
+    sendResponse(true, 'Logged out');
+}
+
+/**
+ * Complete a password reset using a token that was emailed to the user.
+ */
+function handleResetPassword() {
+    sv_rate_limit_or_die('reset', 10, 600);
+
+    $data = json_decode(file_get_contents('php://input'), true);
+
+    if (!is_array($data) || !isset($data['token']) || !isset($data['password'])) {
+        sendResponse(false, 'Token and new password are required', null, 400);
+        return;
+    }
+
+    $token    = (string) $data['token'];
+    $password = (string) $data['password'];
+
+    // Enforce the same password policy as registration.
+    if (strlen($password) < 8) {
+        sendResponse(false, 'Password must be at least 8 characters', null, 400);
+        return;
+    }
+    if (!preg_match('/[A-Z]/', $password)) {
+        sendResponse(false, 'Password must contain at least one uppercase letter', null, 400);
+        return;
+    }
+    if (!preg_match('/[0-9]/', $password)) {
+        sendResponse(false, 'Password must contain at least one number', null, 400);
+        return;
+    }
+
+    // Tokens are stored hashed; hash the supplied token to look it up.
+    $tokenHash = hash('sha256', $token);
+
+    global $db;
+
+    $stmt = $db->prepare("SELECT id FROM users WHERE reset_token = ? AND reset_token_expires IS NOT NULL AND reset_token_expires > NOW()");
+    $stmt->bind_param('s', $tokenHash);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($result->num_rows === 0) {
+        sendResponse(false, 'This password reset link is invalid or has expired. Please request a new one.', null, 400);
+        return;
+    }
+
+    $user = $result->fetch_assoc();
+
+    // Set the new password and invalidate the token (single use).
+    $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+    $stmt = $db->prepare("UPDATE users SET password = ?, reset_token = NULL, reset_token_expires = NULL WHERE id = ?");
+    $stmt->bind_param('si', $hashedPassword, $user['id']);
+
+    if ($stmt->execute()) {
+        sendResponse(true, 'Your password has been reset. You can now log in with your new password.');
+    } else {
+        error_log('auth_api reset-password update failed');
+        sendResponse(false, 'Could not reset password. Please try again later.', null, 500);
+    }
 }
 
 /**
  * Extract JWT token from Authorization header
  */
 function extractToken($authHeader) {
-    error_log("Extracting token from auth header: " . ($authHeader ? substr($authHeader, 0, 20) . '...' : 'none'));
-    
     if (!$authHeader) {
-        error_log("Token extraction failed: No auth header provided");
         return null;
     }
-    
+
     if (!preg_match('/^Bearer\s+(.*?)$/i', $authHeader, $matches)) {
-        // If it doesn't have the Bearer prefix but looks like a JWT token, try to use it directly
-        if (strpos($authHeader, '.') !== false && substr_count($authHeader, '.') === 2) {
-            error_log("Token extraction: Using raw token (no Bearer prefix)");
+        // Accept a raw JWT (three dot-separated segments) without a Bearer prefix.
+        if (substr_count($authHeader, '.') === 2) {
             return $authHeader;
         }
-        
-        error_log("Token extraction failed: Auth header does not match Bearer pattern");
         return null;
     }
-    
-    error_log("Token successfully extracted, length: " . strlen($matches[1]));
-    
+
     return $matches[1];
 }
 
@@ -919,43 +1039,55 @@ function extractToken($authHeader) {
  * Authenticate request and return user data or send error response
  */
 function authenticateRequest($authHeader) {
-    error_log("Authenticating request with auth header: " . ($authHeader ? substr($authHeader, 0, 20) . '...' : 'none'));
-    
     $token = extractToken($authHeader);
-    
+
     if (!$token) {
-        error_log("Authentication failed: No token provided");
         return null;
     }
-    
+
     $userData = validateJWT($token);
-    
+
     if (!$userData) {
-        error_log("Authentication failed: Invalid or expired token");
         return null;
     }
-    
-    error_log("Authentication successful for user ID: " . $userData->sub);
-    
+
+    // CSRF defence for cookie-authenticated requests: state-changing methods must
+    // carry an X-Requested-With header. A cross-site page cannot set that header
+    // without a CORS preflight, which our origin allow-list rejects; combined with
+    // the cookie's SameSite=Strict attribute this blocks CSRF. The desktop client
+    // authenticates via the Authorization header and is unaffected.
+    if (!empty($GLOBALS['sv_auth_from_cookie'])) {
+        $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+        if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) {
+            $xrw = $_SERVER['HTTP_X_REQUESTED_WITH'] ?? '';
+            if (strcasecmp($xrw, 'XMLHttpRequest') !== 0) {
+                sendResponse(false, 'Missing required request header', null, 403);
+            }
+        }
+    }
+
     return $userData;
 }
 
 /**
  * Handle profile photo upload
  */
-function handleProfilePhotoUpload($authHeader) {
-    // Include file upload utility
-    require_once 'file_upload.php';
-    
+function handleProfilePhotoUploadRequest($authHeader) {
+    // Include file upload utility (defines handleProfilePhotoUpload()).
+    require_once __DIR__ . '/file_upload.php';
+
     $userData = authenticateRequest($authHeader);
-    if (!$userData) return;
-    
+    if (!$userData) {
+        sendResponse(false, 'Authentication required', null, 401);
+        return;
+    }
+
     // Check if files were uploaded
-    if (!isset($_FILES['photo']) || empty($_FILES['photo'])) {
+    if (!isset($_FILES['photo']) || !is_array($_FILES['photo'])) {
         sendResponse(false, 'No file uploaded', null, 400);
         return;
     }
-    
+
     // Process the uploaded file
     $result = handleProfilePhotoUpload($_FILES['photo'], $userData->userId);
     
@@ -983,30 +1115,23 @@ function handleProfilePhotoUpload($authHeader) {
  * Handle admin request with admin verification
  */
 function handleAdminRequest($authHeader) {
-    error_log("Handling admin request with auth header: " . ($authHeader ? substr($authHeader, 0, 20) . '...' : 'none'));
-    
     // Use our custom auth header retrieval function if no header was provided
     if (!$authHeader) {
         $authHeader = getAuthHeaderFromRequest();
-        error_log("Retrieved auth header from alternate sources: " . ($authHeader ? substr($authHeader, 0, 20) . '...' : 'still none'));
     }
-    
+
     $userData = authenticateRequest($authHeader);
     if (!$userData) {
-        error_log("Admin request failed: Authentication failed");
         sendResponse(false, 'Authentication required', null, 401);
         return;
     }
-    
+
     // Check if user is admin
     if (!isset($userData->admin) || !$userData->admin) {
-        error_log("Admin request failed: User is not an admin");
         sendResponse(false, 'Unauthorized: Admin privileges required', null, 403);
         return;
     }
-    
-    error_log("Admin request successful: User ID " . $userData->sub . " is an admin");
-    
+
     global $db;
     
     // Get user statistics for admin dashboard

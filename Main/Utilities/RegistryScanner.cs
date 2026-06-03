@@ -107,16 +107,15 @@ namespace SaveVaultApp.Utilities
                             }
                         }
                         
-                        // Scan install location directory for executables
+                        // Scan install location for executables. Previously this recursed the
+                        // whole tree (SearchOption.AllDirectories) and added every .exe it found,
+                        // which is what produced dozens of identical rows per program (each helper,
+                        // crash reporter and mod tool became its own entry). Instead collect only
+                        // the top level plus shallow binary subfolders (bin, Binaries\Win64, …);
+                        // folder-level de-duplication downstream collapses the rest.
                         if (Directory.Exists(installLocation))
                         {
-                            foreach (string exePath in Directory.GetFiles(installLocation, "*.exe", SearchOption.AllDirectories))
-                            {
-                                if (File.Exists(exePath) && !IsSystemOrUtilityExecutable(exePath))
-                                {
-                                    executablePaths.Add(exePath);
-                                }
-                            }
+                            CollectInstallExecutables(installLocation, executablePaths, depth: 0);
                         }
                     }
                     catch (Exception ex)
@@ -599,6 +598,46 @@ namespace SaveVaultApp.Utilities
             }
         }
         
+        /// <summary>
+        /// Immediate subfolder names worth descending into when collecting an install's
+        /// executables: the conventional places a main executable is placed.
+        /// </summary>
+        private static readonly HashSet<string> ExecutableSubfolders = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "bin", "binaries", "win64", "win32", "win", "x64", "x86", "x86_64", "game", "app", "client"
+        };
+
+        /// <summary>
+        /// Adds the .exe files directly in <paramref name="directory"/>, then recurses (up to two
+        /// levels) only into conventional binary subfolders. This keeps engine executables buried
+        /// in <c>Binaries\Win64</c> discoverable without dragging in every helper/tool exe scattered
+        /// across an install tree. Junk executables are filtered out.
+        /// </summary>
+        private static void CollectInstallExecutables(string directory, HashSet<string> executablePaths, int depth)
+        {
+            try
+            {
+                foreach (string exePath in Directory.GetFiles(directory, "*.exe"))
+                {
+                    if (File.Exists(exePath) && !IsSystemOrUtilityExecutable(exePath))
+                        executablePaths.Add(exePath);
+                }
+
+                if (depth >= 2)
+                    return;
+
+                foreach (string subDir in Directory.GetDirectories(directory))
+                {
+                    if (ExecutableSubfolders.Contains(Path.GetFileName(subDir)))
+                        CollectInstallExecutables(subDir, executablePaths, depth + 1);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error collecting executables in {directory}: {ex.Message}");
+            }
+        }
+
         private static bool IsSystemOrUtilityExecutable(string exePath)
         {
             // Drop clearly-junk helper processes (browsers, crash handlers, runtime hosts)

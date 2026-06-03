@@ -79,49 +79,58 @@ class JWT {
  */
 function validateJWT($token, $allowExpired = false) {
     global $JWT_SECRET;
-    
-    error_log("Validating JWT token, length: " . strlen($token));
-    
+
+    if (!is_string($token) || $token === '') {
+        return false;
+    }
+
     // Split token into parts
     $tokenParts = explode('.', $token);
-    
+
     if (count($tokenParts) !== 3) {
-        error_log("JWT validation failed: Invalid token format (expected 3 parts, got " . count($tokenParts) . ")");
         return false; // Invalid token format
     }
-    
+
     list($base64UrlHeader, $base64UrlPayload, $base64UrlSignature) = $tokenParts;
-    
-    // Verify signature
+
+    // Inspect the header and only accept HS256-signed tokens. This blocks
+    // algorithm-confusion attacks (e.g. forged "alg":"none" tokens or attempts
+    // to switch to an asymmetric algorithm).
+    $header = json_decode(base64UrlDecode($base64UrlHeader));
+    if (!is_object($header) || !isset($header->alg) || $header->alg !== 'HS256') {
+        return false;
+    }
+
+    // Verify the signature with a constant-time comparison. The expected value
+    // is passed as the known string (first arg) per hash_equals() guidance.
     $signature = base64UrlDecode($base64UrlSignature);
     $expectedSignature = hash_hmac('sha256', "$base64UrlHeader.$base64UrlPayload", $JWT_SECRET, true);
-    
-    if (!hash_equals($signature, $expectedSignature)) {
-        error_log("JWT validation failed: Invalid signature");
+
+    if (!is_string($signature) || $signature === '' || !hash_equals($expectedSignature, $signature)) {
         return false; // Invalid signature
     }
-    
+
     // Decode payload
-    $decodedPayload = base64UrlDecode($base64UrlPayload);
-    $payload = json_decode($decodedPayload);
-    
-    if (!$payload) {
-        error_log("JWT validation failed: Invalid payload JSON: " . substr($decodedPayload, 0, 30) . "...");
+    $payload = json_decode(base64UrlDecode($base64UrlPayload));
+
+    if (!is_object($payload)) {
         return false; // Invalid payload
     }
-    
+
     // Check expiration
     if (!$allowExpired && isset($payload->exp) && $payload->exp < time()) {
-        error_log("JWT validation failed: Token expired. Expiry: " . date('Y-m-d H:i:s', $payload->exp) . ", Current: " . date('Y-m-d H:i:s'));
         return false; // Token expired
     }
-    
+
+    // A subject (user id) is mandatory for every token we issue.
+    if (!isset($payload->sub)) {
+        return false;
+    }
+
     // Add userId and id for convenience and backward compatibility
     $payload->userId = $payload->sub;
     $payload->id = $payload->sub; // Add id property that matches sub
-    
-    error_log("JWT validation successful for user ID: " . $payload->sub);
-    
+
     return $payload;
 }
 
@@ -138,13 +147,40 @@ function base64UrlEncode($data) {
 }
 
 /**
+ * Return the validated JWT payload from the `auth_token` cookie, or null when no
+ * correctly-signed, unexpired token is present.
+ *
+ * Site pages use this to derive login state / admin status from a *verified*
+ * token instead of trusting the unsigned, attacker-controllable cookie body.
+ *
+ * @return object|null Decoded payload, or null if missing/invalid/expired.
+ */
+function getAuthenticatedUserFromCookie() {
+    if (empty($_COOKIE['auth_token'])) {
+        return null;
+    }
+    $payload = validateJWT($_COOKIE['auth_token']);
+    return $payload === false ? null : $payload;
+}
+
+/**
  * Base64Url decode a string
- * 
+ *
  * @param string $data Data to decode
  * @return string Decoded data
  */
 function base64UrlDecode($data) {
+    if (!is_string($data) || $data === '') {
+        return '';
+    }
     $base64 = strtr($data, '-_', '+/');
-    $paddedBase64 = str_pad($base64, strlen($data) % 4, '=', STR_PAD_RIGHT);
-    return base64_decode($paddedBase64);
+    // Restore the '=' padding stripped during encoding so the length is a
+    // multiple of 4 (the previous implementation padded to the wrong length).
+    $remainder = strlen($base64) % 4;
+    if ($remainder > 0) {
+        $base64 .= str_repeat('=', 4 - $remainder);
+    }
+    // Strict decoding rejects tokens containing invalid base64 characters.
+    $decoded = base64_decode($base64, true);
+    return $decoded === false ? '' : $decoded;
 }

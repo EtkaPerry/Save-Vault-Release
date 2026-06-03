@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using SaveVaultApp.Models;
 using SaveVaultApp.ViewModels;
 
@@ -264,37 +265,64 @@ namespace SaveVaultApp.Utilities
         {
             try
             {
-                string steamUserDataPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "Steam",
-                    "userdata"
-                );
+                string exeDir = Path.GetDirectoryName(app.ExecutablePath) ?? string.Empty;
 
-                if (!Directory.Exists(steamUserDataPath))
-                {
+                // Only Steam games (…\steamapps\common\<installdir>\…) are handled here.
+                string normalized = exeDir.Replace('/', '\\');
+                int saIdx = normalized.IndexOf("steamapps\\common\\", StringComparison.OrdinalIgnoreCase);
+                if (saIdx < 0)
                     return "Unknown";
+
+                // The library's steamapps directory (where the appmanifest files live) and the
+                // game's install-folder name, e.g. "Cities_Skylines".
+                string steamAppsDir = normalized.Substring(0, saIdx + "steamapps".Length);
+                string afterCommon = normalized.Substring(saIdx + "steamapps\\common\\".Length);
+                string installDir = afterCommon.Split('\\', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(installDir) || !Directory.Exists(steamAppsDir))
+                    return "Unknown";
+
+                // Map the install folder to its numeric Steam app id via the matching manifest, so
+                // the cloud-save folder we return belongs to THIS game (the previous implementation
+                // returned the first game's "remote" folder it happened to find).
+                string? appId = null;
+                foreach (string manifest in Directory.GetFiles(steamAppsDir, "appmanifest_*.acf"))
+                {
+                    try
+                    {
+                        string content = File.ReadAllText(manifest);
+                        var installMatch = Regex.Match(content, "\"installdir\"\\s+\"([^\"]+)\"", RegexOptions.IgnoreCase);
+                        if (!installMatch.Success ||
+                            !string.Equals(installMatch.Groups[1].Value, installDir, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        var appIdMatch = Regex.Match(content, "\"appid\"\\s+\"(\\d+)\"", RegexOptions.IgnoreCase);
+                        if (appIdMatch.Success)
+                            appId = appIdMatch.Groups[1].Value;
+                        break;
+                    }
+                    catch
+                    {
+                        // Skip an unreadable/locked manifest and try the next.
+                    }
                 }
 
-                // Get the game's folder name from its exe path
-                string exeDir = Path.GetDirectoryName(app.ExecutablePath) ?? string.Empty;
-                if (exeDir.Contains("steamapps\\common\\"))
+                if (string.IsNullOrEmpty(appId))
+                    return "Unknown";
+
+                // userdata (per-account cloud saves) lives under the MAIN Steam install, not under
+                // extra library folders.
+                string? steamRoot = FindSteamRootWithUserData();
+                if (steamRoot == null)
+                    return "Unknown";
+
+                string userDataPath = Path.Combine(steamRoot, "userdata");
+
+                // Return this specific game's cloud-save folder for whichever account has data.
+                foreach (string accountFolder in Directory.GetDirectories(userDataPath))
                 {
-                    string gameFolderName = exeDir.Split(new[] { "steamapps\\common\\" }, StringSplitOptions.None).Last();
-                    if (!string.IsNullOrEmpty(gameFolderName))
-                    {
-                        // Steam uses numeric app IDs for save folders, so we need to check each user's folder
-                        foreach (string userFolder in Directory.GetDirectories(steamUserDataPath))
-                        {
-                            foreach (string appFolder in Directory.GetDirectories(userFolder))
-                            {
-                                string remoteFolder = Path.Combine(appFolder, "remote");
-                                if (Directory.Exists(remoteFolder) && Directory.EnumerateFileSystemEntries(remoteFolder).Any())
-                                {
-                                    return remoteFolder;
-                                }
-                            }
-                        }
-                    }
+                    string remoteFolder = Path.Combine(accountFolder, appId, "remote");
+                    if (Directory.Exists(remoteFolder) && Directory.EnumerateFileSystemEntries(remoteFolder).Any())
+                        return remoteFolder;
                 }
 
                 return "Unknown";
@@ -304,6 +332,34 @@ namespace SaveVaultApp.Utilities
                 Debug.WriteLine($"Error detecting Steam save path: {ex.Message}");
                 return "Unknown";
             }
+        }
+
+        /// <summary>
+        /// Locates the main Steam installation — the one that owns the <c>userdata</c> folder where
+        /// per-account cloud saves live (extra library folders do not have one). Returns null when
+        /// no Steam install with a userdata folder is found.
+        /// </summary>
+        private static string? FindSteamRootWithUserData()
+        {
+            var candidates = new List<string>
+            {
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Steam"),
+            };
+
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                if (drive.IsReady && drive.DriveType == DriveType.Fixed)
+                    candidates.Add(Path.Combine(drive.Name, "Steam"));
+            }
+
+            foreach (var candidate in candidates)
+            {
+                if (Directory.Exists(Path.Combine(candidate, "userdata")))
+                    return candidate;
+            }
+
+            return null;
         }        public static string ExpandEnvironmentVariables(string path)
         {
             if (string.IsNullOrEmpty(path))

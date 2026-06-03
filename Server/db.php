@@ -3,9 +3,12 @@
  * Database configuration
  */
 
-// Enable error reporting for debugging
+// Log errors server-side, but never render them to clients (they can leak
+// file paths, credentials and SQL). Display is disabled in production.
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
 
 // Database credentials
 define('DB_HOST', 'localhost');

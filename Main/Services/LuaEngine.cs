@@ -19,6 +19,12 @@ public class LuaEngine
     private Lua? _lua;
     private readonly Dictionary<string, Extension> _loadedExtensions = new();
 
+    // Per-extension Lua environment (its _ENV). Each extension's script runs in its
+    // own table that falls through to _G for shared API functions / stdlib / the json
+    // helper, so two extensions can define the same global name (onLoad, applyTheme,
+    // event callbacks, state) without overwriting each other in a single shared VM.
+    private readonly Dictionary<string, LuaTable> _extensionEnvironments = new();
+
     // Theme resource keys that extensions have overridden at the Application level.
     // Tracked so we can revert them cleanly when switching themes (no restart needed).
     private readonly HashSet<string> _themeOverrideKeys = new();
@@ -84,6 +90,37 @@ public class LuaEngine
                 try { _lua.State.SetHook(_watchdogHook, KeraLua.LuaHookMask.Disabled, 0); } catch { /* best effort */ }
                 _executionStopwatch = null;
             }
+        }
+    }
+
+    /// <summary>Create a fresh extension environment that reads through to _G but keeps writes local.</summary>
+    private LuaTable? CreateExtensionEnv()
+    {
+        if (_lua == null) return null;
+        var result = _lua.DoString("return setmetatable({}, { __index = _G })");
+        return result.Length > 0 ? result[0] as LuaTable : null;
+    }
+
+    /// <summary>
+    /// Compile and run <paramref name="code"/> with <paramref name="env"/> as its _ENV
+    /// (Lua 5.4 <c>load(chunk, name, 't', env)</c>), so the script's globals are isolated
+    /// to that environment instead of leaking into the shared _G. Call inside <see cref="RunGuarded"/>.
+    /// </summary>
+    private void RunScriptInEnv(string code, string chunkName, LuaTable env)
+    {
+        if (_lua == null) return;
+        _lua["__sv_src"] = code;
+        _lua["__sv_env"] = env;
+        _lua["__sv_name"] = "@" + chunkName;
+        try
+        {
+            _lua.DoString("local f, e = load(__sv_src, __sv_name, 't', __sv_env); if not f then error(e) end; f()");
+        }
+        finally
+        {
+            _lua["__sv_src"] = null;
+            _lua["__sv_env"] = null;
+            _lua["__sv_name"] = null;
         }
     }
 
@@ -193,14 +230,25 @@ public class LuaEngine
             // onLoad() can resolve this extension's manifest policy.
             _loadedExtensions[extension.Id] = extension;
 
+            // Give the extension its own isolated environment so its globals do not
+            // collide with other extensions sharing this Lua VM.
+            var env = CreateExtensionEnv();
+            if (env == null)
+            {
+                _loadedExtensions.Remove(extension.Id);
+                LoggingService.Instance.Error($"Failed to create isolated environment for extension '{extension.Name}'");
+                return false;
+            }
+            _extensionEnvironments[extension.Id] = env;
+
             RunGuarded(() =>
             {
-                // Execute the extension script
+                // Execute the extension script inside its own environment
                 LoggingService.Instance.Info($"Executing Lua script for extension '{extension.Name}'");
-                lua.DoString(scriptContent);
+                RunScriptInEnv(scriptContent, extension.Id, env);
 
-                // Call initialization function if it exists
-                var initFunction = lua["onLoad"];
+                // Call initialization function if it exists (looked up in the extension's env)
+                var initFunction = env["onLoad"];
                 if (initFunction is LuaFunction initFunc)
                 {
                     LoggingService.Instance.Info($"Calling onLoad() for extension '{extension.Name}'");
@@ -219,6 +267,7 @@ public class LuaEngine
         catch (Exception ex)
         {
             _loadedExtensions.Remove(extension.Id); // roll back the early registration
+            _extensionEnvironments.Remove(extension.Id);
             LoggingService.Instance.Error($"Failed to load extension '{extension.Name}': {ex.Message}");
             LoggingService.Instance.Error($"Script content preview: {scriptContent.Substring(0, Math.Min(200, scriptContent.Length))}...");
             return false;
@@ -245,13 +294,15 @@ public class LuaEngine
             // Set extension context
             _lua["currentExtensionId"] = extensionId;
             _lua["currentExtensionName"] = extension.Name;
-            
-            // Call unload function if it exists
-            var unloadFunction = _lua["onUnload"];
+
+            // Call unload function if it exists (looked up in the extension's own env)
+            var unloadFunction = _extensionEnvironments.TryGetValue(extensionId, out var env)
+                ? env["onUnload"]
+                : null;
             if (unloadFunction is LuaFunction unloadFunc)
             {
                 LoggingService.Instance.Info($"Calling onUnload() for extension '{extension.Name}'");
-                unloadFunc.Call();
+                RunGuarded(() => unloadFunc.Call());
                 LoggingService.Instance.Info($"onUnload() completed for extension '{extension.Name}'");
             }
             else
@@ -273,8 +324,9 @@ public class LuaEngine
             
             // Clean up translations
             ExtensionTranslationService.Instance.RemoveExtensionTranslations(extensionId);
-            
+
             _loadedExtensions.Remove(extensionId);
+            _extensionEnvironments.Remove(extensionId);
             LoggingService.Instance.Info($"Extension '{extension.Name}' unloaded successfully");
         }
         catch (Exception ex)
@@ -685,8 +737,11 @@ public class LuaEngine
             _lua["currentExtensionId"] = extensionId;
             _lua["currentExtensionName"] = _loadedExtensions[extensionId].Name;
 
-            // Get the callback function
-            var callbackFunction = _lua[functionName];
+            // Get the callback function from the extension's own environment, so a
+            // callback name defined by another extension can never be invoked here.
+            var callbackFunction = _extensionEnvironments.TryGetValue(extensionId, out var env)
+                ? env[functionName]
+                : null;
             if (callbackFunction is LuaFunction callback)
             {
                 // Call with arguments under the execution watchdog
@@ -910,6 +965,7 @@ end)()
             UnloadExtension(extensionId);
         }
 
+        _extensionEnvironments.Clear();
         _lua?.Dispose();
         _lua = null;
     }
@@ -1161,15 +1217,26 @@ end)()
             _lua["currentExtensionName"] = extension.Name;
             _lua["currentExtensionVersion"] = extension.Version;
 
-            // Re-run the script so this extension's globals (incl. applyTheme) are current,
-            // under the execution watchdog.
-            var lua = _lua!; // non-null: checked at method entry
+            // Get or create this theme extension's isolated environment.
+            if (!_extensionEnvironments.TryGetValue(extension.Id, out var env) || env == null)
+            {
+                env = CreateExtensionEnv();
+                if (env == null)
+                {
+                    LoggingService.Instance.Error($"Failed to create environment for theme extension '{extension.Id}'");
+                    return false;
+                }
+                _extensionEnvironments[extension.Id] = env;
+            }
+
+            // Re-run the script in its own env so this extension's applyTheme() is
+            // current, under the execution watchdog.
             var scriptText = File.ReadAllText(extension.ScriptPath);
             bool applied = false;
             RunGuarded(() =>
             {
-                lua.DoString(scriptText);
-                if (lua["applyTheme"] is LuaFunction applyFunc)
+                RunScriptInEnv(scriptText, extension.Id, env);
+                if (env["applyTheme"] is LuaFunction applyFunc)
                 {
                     applyFunc.Call();
                     applied = true;

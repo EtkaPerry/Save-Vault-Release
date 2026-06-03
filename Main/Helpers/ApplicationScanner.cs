@@ -24,10 +24,23 @@ namespace SaveVaultApp.Helpers
             await Task.Run(async () =>
             {
                 var processedExecutables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                
+
+                // Tracks the install/game-root folder of every app already added so that the many
+                // executables shipped inside a single game folder (the launcher, crash reporter,
+                // mod tools, 32/64-bit variants, …) collapse to one list entry instead of dozens
+                // of identical rows. Owned by the background scan thread; first acceptable exe wins.
+                var claimedRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                 // Helper function to add an app safely on the UI thread
                 void AddAppSafely(ApplicationInfo app)
                 {
+                    if (string.IsNullOrEmpty(app.ExecutablePath))
+                        return;
+
+                    string root = AppIdentity.GameRootFolder(app.ExecutablePath);
+                    if (!string.IsNullOrEmpty(root) && !claimedRoots.Add(root))
+                        return; // Another executable from this folder is already listed.
+
                     if (!installedApps.Any(a => string.Equals(a.ExecutablePath, app.ExecutablePath, StringComparison.OrdinalIgnoreCase)))
                     {
                         Avalonia.Threading.Dispatcher.UIThread.Post(() => installedApps.Add(app));

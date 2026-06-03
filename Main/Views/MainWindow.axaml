@@ -1783,6 +1783,124 @@
                         </Border>
                         
                         <!-- Authentication Popup -->
+                        <!-- First-run "games we found" panel -->
+                        <Border IsVisible="{Binding IsFirstRunResultsOpen}"
+                                Background="#80000000"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Stretch"
+                                ZIndex="100">
+                            <Border Width="560"
+                                    MaxHeight="600"
+                                    CornerRadius="12"
+                                    Background="{DynamicResource PanelBackground}"
+                                    BoxShadow="0 8 32 0 #40000000"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Padding="28"
+                                    Classes.show="{Binding IsFirstRunResultsOpen}">
+                                <Border.Styles>
+                                    <Style Selector="Border.show">
+                                        <Style.Animations>
+                                            <Animation Duration="0:0:0.3" FillMode="Forward" Easing="CubicEaseOut">
+                                                <KeyFrame Cue="0%">
+                                                    <Setter Property="Opacity" Value="0"/>
+                                                    <Setter Property="ScaleTransform.ScaleX" Value="0.85"/>
+                                                    <Setter Property="ScaleTransform.ScaleY" Value="0.85"/>
+                                                </KeyFrame>
+                                                <KeyFrame Cue="100%">
+                                                    <Setter Property="Opacity" Value="1"/>
+                                                    <Setter Property="ScaleTransform.ScaleX" Value="1"/>
+                                                    <Setter Property="ScaleTransform.ScaleY" Value="1"/>
+                                                </KeyFrame>
+                                            </Animation>
+                                        </Style.Animations>
+                                    </Style>
+                                </Border.Styles>
+
+                                <Grid RowDefinitions="Auto,*,Auto">
+                                    <!-- Header -->
+                                    <StackPanel Grid.Row="0" Spacing="6" Margin="0,0,0,18">
+                                        <Image Source="/Assets/logo.ico" Width="44" Height="44"
+                                               HorizontalAlignment="Center" Margin="0,0,0,4"/>
+                                        <TextBlock Text="{Binding FirstRunTitle}"
+                                                   FontSize="22"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center"/>
+                                        <TextBlock Text="{Binding FirstRunSubtitle}"
+                                                   Foreground="{DynamicResource SecondaryTextColor}"
+                                                   TextWrapping="Wrap"
+                                                   TextAlignment="Center"
+                                                   HorizontalAlignment="Center"/>
+                                    </StackPanel>
+
+                                    <!-- Detected games -->
+                                    <Border Grid.Row="1"
+                                            IsVisible="{Binding FirstRunHasGames}"
+                                            Background="{DynamicResource TextBoxBackground}"
+                                            CornerRadius="8"
+                                            Padding="4">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="340">
+                                            <ItemsControl ItemsSource="{Binding FirstRunGames}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="vm:FirstRunGameItem">
+                                                        <Grid ColumnDefinitions="Auto,*" Margin="10,7">
+                                                            <Ellipse Grid.Column="0"
+                                                                     Width="10" Height="10"
+                                                                     VerticalAlignment="Center"
+                                                                     Margin="0,0,12,0"
+                                                                     Fill="{Binding HasSave, Converter={StaticResource BoolToColorConverter}, ConverterParameter='#4CAF50,#7A7F87'}"/>
+                                                            <StackPanel Grid.Column="1" Spacing="1">
+                                                                <TextBlock Text="{Binding Name}"
+                                                                           FontWeight="SemiBold"
+                                                                           TextTrimming="CharacterEllipsis"/>
+                                                                <TextBlock Text="{Binding Detail}"
+                                                                           FontSize="11"
+                                                                           Foreground="{DynamicResource SecondaryTextColor}"
+                                                                           TextTrimming="CharacterEllipsis"/>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </Border>
+
+                                    <!-- Footer -->
+                                    <Grid Grid.Row="2" Margin="0,18,0,0" ColumnDefinitions="*,Auto">
+                                        <TextBlock Grid.Column="0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource SecondaryTextColor}"
+                                                   FontSize="11"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,0,12,0"
+                                                   Text="You can adjust any save folder later from each app's page."/>
+                                        <Button Grid.Column="1"
+                                                Command="{Binding DismissFirstRunResultsCommand}"
+                                                Classes="primary"
+                                                Height="40"
+                                                MinWidth="120"
+                                                HorizontalContentAlignment="Center"
+                                                VerticalContentAlignment="Center">
+                                            <TextBlock Text="Get started"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"/>
+                                            <Button.Styles>
+                                                <Style Selector="Button.primary">
+                                                    <Setter Property="Background" Value="#FF9800"/>
+                                                    <Setter Property="Foreground" Value="White"/>
+                                                    <Setter Property="CornerRadius" Value="6"/>
+                                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                                </Style>
+                                                <Style Selector="Button.primary:pointerover">
+                                                    <Setter Property="Background" Value="#F57C00"/>
+                                                </Style>
+                                            </Button.Styles>
+                                        </Button>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </Border>
+
                         <Border IsVisible="{Binding IsLoginPopupOpen}"
                                 Background="#80000000"
                                 HorizontalAlignment="Stretch"

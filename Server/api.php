@@ -5,20 +5,12 @@
  * Moved from index.php
  */
 
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+require_once __DIR__ . '/security.php';
+sv_init_api('GET, POST, OPTIONS'); // error handling, JSON headers, CORS allow-list, preflight
 
-// Handle preflight OPTIONS request
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
-}
-
-require_once 'config.php';
-require_once 'db.php';
-require_once 'jwt_helper.php';
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/jwt_helper.php';
 
 // Get the request path
 $requestUri = $_SERVER['REQUEST_URI'];
@@ -63,10 +55,14 @@ function handleLogin() {
         sendResponse(false, "Method not allowed", null, 405);
         return;
     }
+
+    // Throttle credential-stuffing / brute-force attempts per client IP.
+    sv_rate_limit_or_die('api_login', 10, 300);
+
     // Get JSON input
     $data = json_decode(file_get_contents('php://input'), true);
-    
-    if (!isset($data['usernameOrEmail']) || !isset($data['password'])) {
+
+    if (!is_array($data) || !isset($data['usernameOrEmail']) || !isset($data['password'])) {
         sendResponse(false, "Username/email and password are required", null, 400);
         return;
     }
@@ -74,24 +70,25 @@ function handleLogin() {
     $usernameOrEmail = $data['usernameOrEmail'];
     $password = $data['password'];
     global $db;
-    
+
     try {
         // Check if user exists by username or email
-        // Fix: Changed 'password_hash' to 'password' to match DB schema
         $stmt = $db->prepare("SELECT id, username, password FROM users WHERE username = ? OR email = ?");
         $stmt->bind_param("ss", $usernameOrEmail, $usernameOrEmail);
         $stmt->execute();
         $result = $stmt->get_result();
-        
+
         if ($result->num_rows === 0) {
+            // Run a dummy verification (against a valid throwaway bcrypt hash)
+            // so response timing does not reveal whether the account exists.
+            password_verify($password, '$2y$10$CZCJTHVUrmMnoCsc8MEaRuUt6IpUvP.571mzyrz2Bj.cz1uE1AfYW');
             sendResponse(false, "Invalid username or password", null, 401);
             return;
         }
-        
+
         $user = $result->fetch_assoc();
-        
+
         // Verify password
-        // Fix: Changed 'password_hash' to 'password' to match DB schema
         if (!password_verify($password, $user['password'])) {
             sendResponse(false, "Invalid username or password", null, 401);
             return;
@@ -118,7 +115,8 @@ function handleLogin() {
         ], 200);
         
     } catch (Exception $e) {
-        sendResponse(false, "Server error: " . $e->getMessage(), null, 500);
+        error_log("api.php error: " . $e->getMessage());
+        sendResponse(false, "An unexpected server error occurred. Please try again later.", null, 500);
     }
 }
 
@@ -130,10 +128,14 @@ function handleRegister() {
         sendResponse(false, "Method not allowed", null, 405);
         return;
     }
+
+    // Limit automated mass account creation per client IP.
+    sv_rate_limit_or_die('api_register', 5, 600);
+
     // Get JSON input
     $data = json_decode(file_get_contents('php://input'), true);
-    
-    if (!isset($data['username']) || !isset($data['password']) || !isset($data['email'])) {
+
+    if (!is_array($data) || !isset($data['username']) || !isset($data['password']) || !isset($data['email'])) {
         sendResponse(false, "Username, email, and password are required", null, 400);
         return;
     }
@@ -186,9 +188,9 @@ function handleRegister() {
         $success = $stmt->execute();
         
         if (!$success) {
-            // Provide more specific error if possible
-            sendResponse(false, "Registration failed: " . $stmt->error, null, 500); 
+            error_log("api.php register failed: " . $stmt->error);
             $stmt->close(); // Close statement on failure
+            sendResponse(false, "Registration failed. Please try again later.", null, 500);
             return;
         }
         
@@ -207,7 +209,8 @@ function handleRegister() {
         ], 201);
         
     } catch (Exception $e) {
-        sendResponse(false, "Server error: " . $e->getMessage(), null, 500);
+        error_log("api.php error: " . $e->getMessage());
+        sendResponse(false, "An unexpected server error occurred. Please try again later.", null, 500);
     }
 }
 
@@ -224,7 +227,7 @@ function validateToken() {
     }
     
     $token = $matches[1];
-    $payload = verifyJWT($token);
+    $payload = validateJWT($token);
     
     if ($payload === false) {
         sendResponse(false, "Invalid token", null, 401);
@@ -232,7 +235,7 @@ function validateToken() {
     }
     
     sendResponse(true, "Token is valid", [
-        'username' => $payload['username']
+        'username' => $payload->name
     ], 200);
 }
 
@@ -250,10 +253,10 @@ function handleSync() {
     // Process based on request method
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         // Get user's saved data
-        getUserData($user['user_id']);
+        getUserData($user->userId);
     } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Save user's data
-        saveUserData($user['user_id']);
+        saveUserData($user->userId);
     } else {
         sendResponse(false, "Method not allowed", null, 405);
     }
@@ -263,10 +266,10 @@ function handleSync() {
  * Gets the user's saved data
  */
 function getUserData($userId) {
-    global $conn;
+    global $db;
     
     try {
-        $stmt = $conn->prepare("SELECT data FROM user_data WHERE user_id = ?");
+        $stmt = $db->prepare("SELECT data FROM user_data WHERE user_id = ?");
         $stmt->bind_param("i", $userId);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -282,7 +285,8 @@ function getUserData($userId) {
         sendResponse(true, "Data retrieved", ['data' => $data], 200);
         
     } catch (Exception $e) {
-        sendResponse(false, "Server error: " . $e->getMessage(), null, 500);
+        error_log("api.php error: " . $e->getMessage());
+        sendResponse(false, "An unexpected server error occurred. Please try again later.", null, 500);
     }
 }
 
@@ -300,22 +304,22 @@ function saveUserData($userId) {
     
     $data = json_encode($input['data']);
     
-    global $conn;
+    global $db;
     
     try {
         // Check if user already has data
-        $stmt = $conn->prepare("SELECT id FROM user_data WHERE user_id = ?");
+        $stmt = $db->prepare("SELECT id FROM user_data WHERE user_id = ?");
         $stmt->bind_param("i", $userId);
         $stmt->execute();
         $result = $stmt->get_result();
         
         if ($result->num_rows > 0) {
             // Update existing data
-            $stmt = $conn->prepare("UPDATE user_data SET data = ?, updated_at = NOW() WHERE user_id = ?");
+            $stmt = $db->prepare("UPDATE user_data SET data = ?, updated_at = NOW() WHERE user_id = ?");
             $stmt->bind_param("si", $data, $userId);
         } else {
             // Insert new data
-            $stmt = $conn->prepare("INSERT INTO user_data (user_id, data, created_at, updated_at) VALUES (?, ?, NOW(), NOW())");
+            $stmt = $db->prepare("INSERT INTO user_data (user_id, data, created_at, updated_at) VALUES (?, ?, NOW(), NOW())");
             $stmt->bind_param("is", $userId, $data);
         }
         
@@ -329,7 +333,8 @@ function saveUserData($userId) {
         sendResponse(true, "Data saved successfully", null, 200);
         
     } catch (Exception $e) {
-        sendResponse(false, "Server error: " . $e->getMessage(), null, 500);
+        error_log("api.php error: " . $e->getMessage());
+        sendResponse(false, "An unexpected server error occurred. Please try again later.", null, 500);
     }
 }
 
@@ -342,10 +347,13 @@ function handleForgotPassword() {
         return;
     }
 
+    // Limit abuse of the reset flow per client IP.
+    sv_rate_limit_or_die('api_forgot', 5, 600);
+
     // Get JSON input
     $data = json_decode(file_get_contents('php://input'), true);
-    
-    if (!isset($data['username']) || !isset($data['email'])) {
+
+    if (!is_array($data) || !isset($data['username']) || !isset($data['email'])) {
         sendResponse(false, "Both username and email are required", null, 400);
         return;
     }
@@ -353,11 +361,11 @@ function handleForgotPassword() {
     $username = $data['username'];
     $email = $data['email'];
 
-    global $conn;
+    global $db;
     
     try {
         // Check if user exists with matching username and email
-        $stmt = $conn->prepare("SELECT id FROM users WHERE username = ? AND email = ?");
+        $stmt = $db->prepare("SELECT id FROM users WHERE username = ? AND email = ?");
         $stmt->bind_param("ss", $username, $email);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -385,7 +393,8 @@ function handleForgotPassword() {
         sendResponse(true, "Password reset instructions sent to your email", null, 200);
         
     } catch (Exception $e) {
-        sendResponse(false, "Server error: " . $e->getMessage(), null, 500);
+        error_log("api.php error: " . $e->getMessage());
+        sendResponse(false, "An unexpected server error occurred. Please try again later.", null, 500);
     }
 }
 
@@ -404,7 +413,7 @@ function authenticateRequest() {
     }
     
     $token = $matches[1];
-    $payload = verifyJWT($token);
+    $payload = validateJWT($token);
     
     if ($payload === false) {
         sendResponse(false, "Invalid token", null, 401);

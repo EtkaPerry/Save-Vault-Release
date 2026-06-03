@@ -13,9 +13,17 @@ RewriteRule ^ /%1 [R=301,L,NE]
 # Prevent direct access to sensitive files and directories
 RewriteRule ^site/includes/ - [F,L]
 RewriteRule ^\.git/ - [F,L]
-# Block sensitive file types except in the download directory
+RewriteRule ^logs/ - [F,L]
+
+# Block direct web access to PHP files that are include-only (they define
+# config/helpers and must never be requested directly). The public API
+# entry points (api.php, auth_api.php, *_api.php, index.php) are NOT listed.
+RewriteRule ^(config|auth_config|db|db_handler|jwt_helper|ip_utils|secure_file_validator|file_upload|github_monitor|security|secrets)\.php$ - [F,L]
+
+# Block sensitive file types (schema dumps, backups, logs, configs, scripts)
+# everywhere except the public download directory.
 RewriteCond %{REQUEST_URI} !^/download/
-RewriteRule ^.*\.(?:git|env|log|lock|md)$ - [F,L]
+RewriteRule \.(?:git|env|log|lock|md|sql|sqlite|bak|backup|old|orig|swp|inc|ini|sh|yml|yaml|dist|example)$ - [NC,F,L]
 
 # Custom 404 error page
 
@@ -31,7 +39,7 @@ RewriteRule ^ / [R=301,L]
 RewriteRule ^api/(.*)$ api.php [L,QSA]
 
 # Handle clean URLs for pages
-RewriteRule ^(privacy-policy|terms-of-service|about|contact|security-policy|download|admin|auth|profile)/?$ site/pages/$1.php [L]
+RewriteRule ^(privacy-policy|terms-of-service|about|contact|security-policy|download|admin|auth|profile|reset-password)/?$ site/pages/$1.php [L]
 
 # Allow direct access to assets, download directory and .well-known
 RewriteRule ^site/download/ - [L]
@@ -46,13 +54,23 @@ RewriteRule ^(?!download/).*\.json$ - [F,L]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 
-# Security headers
+# Security headers (apply to every response, including errors).
 <IfModule mod_headers.c>
-    Header set X-Content-Type-Options "nosniff"
-    Header set X-XSS-Protection "1; mode=block"
-    Header set X-Frame-Options "SAMEORIGIN"
-    Header set Referrer-Policy "strict-origin-when-cross-origin"
-    Header set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=()"
+    # Legacy XSS auditor is deprecated and can introduce issues; disable it.
+    Header always set X-XSS-Protection "0"
+    Header always set Cross-Origin-Opener-Policy "same-origin"
+    # HSTS is ignored by browsers over plain HTTP, so it is safe to send always.
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    # NOTE: Content-Security-Policy is set per-request in site/includes/header.php
+    # because it carries a per-request script nonce ('nonce-...'). It is intentionally
+    # NOT set here so the two do not conflict. JSON API responses don't need a CSP.
+    # Do not advertise the PHP version (removes the X-Powered-By banner).
+    Header always unset X-Powered-By
+    Header unset X-Powered-By
 </IfModule>
 
 # Disable directory listing

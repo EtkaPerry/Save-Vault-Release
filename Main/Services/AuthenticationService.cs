@@ -14,7 +14,7 @@ namespace SaveVaultApp.Services
         
         public AuthenticationService()
         {
-            _client = new HttpClient();
+            _client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             _client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             _logger.Info("AuthenticationService initialized");
         }

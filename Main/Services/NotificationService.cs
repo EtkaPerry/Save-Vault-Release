@@ -68,7 +68,7 @@ namespace SaveVaultApp.Services
         public event EventHandler<string>? StatusChanged;        private NotificationService()
         {
             _settings = Settings.Load();
-            _httpClient = new HttpClient();
+            _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
             
             // Initialize storage folder
             _storageFolder = Path.Combine(

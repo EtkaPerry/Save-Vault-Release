@@ -28,6 +28,11 @@ public class AppData
     public Dictionary<string, string> CustomSavePaths { get; set; } = new();
     public HashSet<string> HiddenApps { get; set; } = new();
     public HashSet<string> KnownApplicationPaths { get; set; } = new();
+
+    // Auto-detected save paths (keyed by executable path), cached so the "with save location"
+    // count and the games view stay populated on subsequent launches without re-probing the
+    // filesystem. Distinct from CustomSavePaths, which the user sets explicitly and always wins.
+    public Dictionary<string, string> DetectedSavePaths { get; set; } = new();
     
     // Constructor that ensures this instance is the current static instance
     public AppData()
@@ -58,6 +63,7 @@ public class AppData
                 appData.CustomSavePaths ??= new();
                 appData.HiddenApps ??= new();
                 appData.KnownApplicationPaths ??= new();
+                appData.DetectedSavePaths ??= new();
 
                 _instance = appData;
                 return appData;
@@ -94,7 +100,9 @@ public class AppData
             LastBackupTimes ??= new Dictionary<string, DateTime>();
             CustomNames ??= new Dictionary<string, string>();
             CustomSavePaths ??= new Dictionary<string, string>();
-            HiddenApps ??= new HashSet<string>();            var options = new JsonSerializerOptions { WriteIndented = true };
+            HiddenApps ??= new HashSet<string>();
+            DetectedSavePaths ??= new Dictionary<string, string>();
+            var options = new JsonSerializerOptions { WriteIndented = true };
             var json = JsonSerializer.Serialize(this, options);
             File.WriteAllText(AppDataPath, json);
             

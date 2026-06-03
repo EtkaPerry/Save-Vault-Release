@@ -221,11 +221,12 @@ public partial class MainWindowViewModel : ViewModelBase
             _appData.CustomSavePaths ??= new Dictionary<string, string>();
             _appData.HiddenApps ??= new HashSet<string>();
             _appData.KnownApplicationPaths ??= new HashSet<string>();
+            _appData.DetectedSavePaths ??= new Dictionary<string, string>();
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"Error loading AppData: {ex.Message}");
-            
+
             // Create a new instance if anything fails
             _appData = new AppData();
             _appData.LastBackupTimes = new Dictionary<string, DateTime>();
@@ -233,6 +234,7 @@ public partial class MainWindowViewModel : ViewModelBase
             _appData.CustomSavePaths = new Dictionary<string, string>();
             _appData.HiddenApps = new HashSet<string>();
             _appData.KnownApplicationPaths = new HashSet<string>();
+            _appData.DetectedSavePaths = new Dictionary<string, string>();
         }
         
         // If this is the first run or appdata is empty, migrate settings to app data
@@ -1301,11 +1303,28 @@ public partial class MainWindowViewModel : ViewModelBase
                 }
             }
 
+            // Discovery only fills in save paths for the handful of hard-coded known games. Probe
+            // every discovered app now so the status line — and the first-run panel below — report
+            // real numbers instead of "0 with save location".
+            try
+            {
+                await DetectAndCacheSavePathsAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    StatusMessage = "Application scan cancelled";
+                    IsLoading = false;
+                });
+                return;
+            }
+
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 if (cancellationToken.IsCancellationRequested)
                     return;
-                    
+
                 ApplySort();
                 IsLoading = false;
 
@@ -1356,8 +1375,11 @@ public partial class MainWindowViewModel : ViewModelBase
                         Services.LoggingService.Instance.Info($"Known games with no save location detected: {noSaveLocationList}");
                     }
                 }
+
+                // First launch: reveal what we found.
+                ShowFirstRunResultsIfNeeded();
             });
-            
+
             // Start background scan as usual
             StartBackgroundAppRefresh();
             return;
@@ -1390,11 +1412,35 @@ public partial class MainWindowViewModel : ViewModelBase
         }
 
         // Build the ApplicationInfo objects off the UI thread so the window stays responsive.
+        // While building, retire entries the strengthened junk filter now rejects (e.g. Git's
+        // bundled Unix tools) and collapse duplicate executables from the same game folder, so an
+        // existing cluttered cache cleans itself up on launch without a manual rescan. Anything the
+        // user has curated (custom name/path, hidden, or with backup history) is always kept.
+        int originalKnownCount = knownPaths.Count();
         var builtApps = new List<ApplicationInfo>();
+        var keptPaths = new List<string>();
         await Task.Run(() =>
         {
+            var claimedRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var exePath in knownPaths)
             {
+                bool curated = CachedEntryHasUserData(exePath);
+                string root = AppIdentity.GameRootFolder(exePath);
+                if (!curated)
+                {
+                    if (AppIdentity.IsObviousJunk(exePath))
+                        continue;
+                    if (!string.IsNullOrEmpty(root) && !claimedRoots.Add(root))
+                        continue;
+                }
+                else if (!string.IsNullOrEmpty(root))
+                {
+                    // Keep curated entries, but let their folder block non-curated duplicates.
+                    claimedRoots.Add(root);
+                }
+
+                keptPaths.Add(exePath);
+
                 var appName = AppIdentity.ResolveDisplayName(exePath);
                 var app = new ApplicationInfo(_settings)
                 {
@@ -1470,6 +1516,10 @@ public partial class MainWindowViewModel : ViewModelBase
                     app.SavePath = appDataCustomSavePath;
                 else if (_settings.CustomSavePaths != null && _settings.CustomSavePaths.TryGetValue(exePath, out string? settingsCustomSavePath) && !string.IsNullOrWhiteSpace(settingsCustomSavePath))
                     app.SavePath = settingsCustomSavePath;
+                // Fall back to the auto-detected save path cached from a previous scan so the
+                // "with save location" count stays correct across restarts without re-probing.
+                else if (_appData.DetectedSavePaths != null && _appData.DetectedSavePaths.TryGetValue(exePath, out string? detectedSavePath) && !string.IsNullOrWhiteSpace(detectedSavePath))
+                    app.SavePath = detectedSavePath;
 
                 if (_appData.HiddenApps != null && _appData.HiddenApps.Contains(exePath))
                     app.IsHidden = true;
@@ -1483,6 +1533,16 @@ public partial class MainWindowViewModel : ViewModelBase
                 builtApps.Add(app);
             }
         });
+
+        // Persist the cleaned-up set so the retired junk/duplicate paths don't come back and
+        // aren't re-evaluated on every launch.
+        if (keptPaths.Count < originalKnownCount)
+        {
+            _appData.KnownApplicationPaths = new HashSet<string>(keptPaths, StringComparer.OrdinalIgnoreCase);
+            _appData.Save();
+            Services.LoggingService.Instance.Info(
+                $"Cache cleanup: retired {originalKnownCount - keptPaths.Count} junk/duplicate entries ({keptPaths.Count} kept).");
+        }
 
         // 2. Commit the built apps to the bound collections on the UI thread in
         //    small batches, yielding to the dispatcher between each batch so the
@@ -1508,14 +1568,30 @@ public partial class MainWindowViewModel : ViewModelBase
             });
         }
 
+        // Existing installs upgrading to this version have a populated cache but no detected save
+        // paths yet. Run the detection pass once (results are cached, so later launches skip it)
+        // so the count is correct and the first-run panel has something to show.
+        if (_appData.DetectedSavePaths.Count == 0)
+        {
+            try
+            {
+                await DetectAndCacheSavePathsAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsLoading = false);
+                return;
+            }
+        }
+
         await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
             if (cancellationToken.IsCancellationRequested)
                 return;
-            
+
             ApplySort();
             IsLoading = false;
-              
+
             // Count programs with detected save locations
             int totalPrograms = AllInstalledApps.Count;
             int withSaveLocations = AllInstalledApps.Count(app => !string.IsNullOrEmpty(app.SavePath) && app.SavePath != "Unknown");
@@ -1564,6 +1640,9 @@ public partial class MainWindowViewModel : ViewModelBase
                     Services.LoggingService.Instance.Info($"Known games with no save location detected: {noSaveLocationList}");
                 }
             }
+
+            // First launch after this feature shipped: reveal what we found.
+            ShowFirstRunResultsIfNeeded();
         });
 
         // 3. Start background scan to validate and update the list
@@ -2272,6 +2351,180 @@ public partial class MainWindowViewModel : ViewModelBase
         
         return result.SavePath;
     }
+
+    // ===== First-run "games we found" panel + bulk save-location detection =====
+
+    private bool _isFirstRunResultsOpen;
+    public bool IsFirstRunResultsOpen
+    {
+        get => _isFirstRunResultsOpen;
+        set => this.RaiseAndSetIfChanged(ref _isFirstRunResultsOpen, value);
+    }
+
+    public ObservableCollection<FirstRunGameItem> FirstRunGames { get; } = new();
+
+    private string _firstRunTitle = string.Empty;
+    public string FirstRunTitle
+    {
+        get => _firstRunTitle;
+        set => this.RaiseAndSetIfChanged(ref _firstRunTitle, value);
+    }
+
+    private string _firstRunSubtitle = string.Empty;
+    public string FirstRunSubtitle
+    {
+        get => _firstRunSubtitle;
+        set => this.RaiseAndSetIfChanged(ref _firstRunSubtitle, value);
+    }
+
+    private bool _firstRunHasGames;
+    public bool FirstRunHasGames
+    {
+        get => _firstRunHasGames;
+        set => this.RaiseAndSetIfChanged(ref _firstRunHasGames, value);
+    }
+
+    [RelayCommand]
+    private void DismissFirstRunResults()
+    {
+        IsFirstRunResultsOpen = false;
+        _settings.FirstRunGamesShown = true; // setter queues a save
+    }
+
+    // An app has (or could plausibly have) a managed save folder.
+    private static bool HasUsableSavePath(ApplicationInfo app)
+        => !string.IsNullOrEmpty(app.SavePath) && app.SavePath != "Unknown";
+
+    // True when the user has interacted with a cached app (custom name/path, hidden, or has
+    // backups), so cache cleanup must never silently drop it even if it now looks like junk.
+    private bool CachedEntryHasUserData(string exePath)
+    {
+        return (_appData.CustomNames?.ContainsKey(exePath) ?? false)
+            || (_settings.CustomNames?.ContainsKey(exePath) ?? false)
+            || (_appData.CustomSavePaths?.ContainsKey(exePath) ?? false)
+            || (_settings.CustomSavePaths?.ContainsKey(exePath) ?? false)
+            || (_appData.HiddenApps?.Contains(exePath) ?? false)
+            || (_settings.HiddenApps?.Contains(exePath) ?? false)
+            || (_settings.BackupHistory?.ContainsKey(exePath) ?? false)
+            || (_appData.LastBackupTimes?.ContainsKey(exePath) ?? false)
+            || (_settings.LastBackupTimes?.ContainsKey(exePath) ?? false);
+    }
+
+    // Best-effort "is this a game?" used to pick what the first-run panel highlights.
+    private bool IsLikelyGame(ApplicationInfo app)
+    {
+        if (HasUsableSavePath(app))
+            return true;
+        if (Utilities.AppIdentity.IsLikelyGameLibraryPath(app.ExecutablePath))
+            return true;
+        var known = Utilities.KnownGames.GamesList.FirstOrDefault(g =>
+            g.Name.Equals(app.Name, StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrEmpty(g.Executable) &&
+             app.ExecutablePath.EndsWith(System.IO.Path.GetFileName(g.Executable), StringComparison.OrdinalIgnoreCase)));
+        return known != null;
+    }
+
+    /// <summary>
+    /// Runs save-location detection across every discovered app on a background thread (filesystem
+    /// probing must not touch the UI thread), applies the results on the UI thread, and caches them
+    /// in AppData.DetectedSavePaths so the "with save location" count survives restarts without
+    /// re-probing. Apps that already have a save path (known game, user-set, previously cached) are
+    /// skipped. This is what makes the status line report real numbers instead of "0".
+    /// </summary>
+    private async Task DetectAndCacheSavePathsAsync(CancellationToken cancellationToken)
+    {
+        List<ApplicationInfo> snapshot = new();
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => snapshot = AllInstalledApps.ToList());
+
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            StatusMessage = "Detecting save locations...");
+
+        var results = new List<(ApplicationInfo app, string path)>();
+        await Task.Run(() =>
+        {
+            int processed = 0;
+            foreach (var app in snapshot)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                processed++;
+
+                if (HasUsableSavePath(app))
+                    continue;
+
+                try
+                {
+                    var result = Utilities.SaveLocationDetector.DetectSavePath(app);
+                    if (!string.IsNullOrEmpty(result.SavePath) && result.SavePath != "Unknown")
+                        results.Add((app, result.SavePath));
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex) { Debug.WriteLine($"Save detection failed for {app.Name}: {ex.Message}"); }
+
+                if (processed % 100 == 0)
+                {
+                    int done = processed;
+                    int total = snapshot.Count;
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                        StatusMessage = $"Detecting save locations... ({done}/{total})");
+                }
+            }
+        }, cancellationToken);
+
+        if (results.Count == 0)
+            return;
+
+        // Apply + cache on the UI thread (SavePath raises change notifications).
+        await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            foreach (var (app, path) in results)
+            {
+                app.SavePath = path;
+                _appData.DetectedSavePaths[app.ExecutablePath] = path;
+            }
+        });
+
+        _appData.Save();
+    }
+
+    /// <summary>
+    /// Populates and opens the one-time first-run results panel listing the games we found (those
+    /// with a save location first). No-op if it was already shown once. Call on the UI thread.
+    /// </summary>
+    private void ShowFirstRunResultsIfNeeded()
+    {
+        if (_settings.FirstRunGamesShown || IsFirstRunResultsOpen)
+            return;
+
+        var games = AllInstalledApps
+            .Where(a => !a.IsHidden && IsLikelyGame(a))
+            .OrderByDescending(HasUsableSavePath)
+            .ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        FirstRunGames.Clear();
+        foreach (var game in games)
+        {
+            bool hasSave = HasUsableSavePath(game);
+            FirstRunGames.Add(new FirstRunGameItem
+            {
+                Name = game.Name,
+                HasSave = hasSave,
+                Detail = hasSave ? game.SavePath : "No save folder detected yet"
+            });
+        }
+
+        int withSave = games.Count(HasUsableSavePath);
+        FirstRunHasGames = games.Count > 0;
+        FirstRunTitle = games.Count > 0
+            ? $"We found {games.Count} game{(games.Count == 1 ? "" : "s")}"
+            : "Scan complete";
+        FirstRunSubtitle = games.Count > 0
+            ? $"{withSave} already {(withSave == 1 ? "has" : "have")} a save location ready to back up."
+            : "No games were detected automatically. Use the + button to add one yourself.";
+
+        IsFirstRunResultsOpen = true;
+    }
+
     [RelayCommand]
     public void ResetCache()
     {
@@ -2284,22 +2537,17 @@ public partial class MainWindowViewModel : ViewModelBase
         _settings.KnownApplicationPaths.Clear();
         _settings.BackupHistory.Clear(); // Clear backup history
         _settings.AppSettings.Clear(); // Clear app-specific settings
+        // Re-arm the first-run results panel so a full rescan shows what was found again.
+        _settings.FirstRunGamesShown = false;
         _settings.ForceSave();
-        
+
         // Clear all saved data in AppData
         _appData.LastBackupTimes.Clear();
         _appData.CustomNames.Clear();
         _appData.CustomSavePaths.Clear();
         _appData.HiddenApps.Clear();
         _appData.KnownApplicationPaths.Clear();
-        _appData.Save();
-        
-        // Clear all saved data in AppData
-        _appData.LastBackupTimes.Clear();
-        _appData.CustomNames.Clear();
-        _appData.CustomSavePaths.Clear();
-        _appData.HiddenApps.Clear();
-        _appData.KnownApplicationPaths.Clear();
+        _appData.DetectedSavePaths.Clear();
         _appData.Save();
         
         // Update UI status
@@ -3377,14 +3625,25 @@ public partial class MainWindowViewModel : ViewModelBase
                         AllInstalledApps.Select(a => Path.GetFileName(a.ExecutablePath)),
                         StringComparer.OrdinalIgnoreCase
                     );
-                    
+
+                    // Track game/app folders already represented so we don't re-add a second
+                    // executable from a folder that's already in the list (keeps dedup consistent
+                    // with the main scan).
+                    var existingRoots = new HashSet<string>(
+                        AllInstalledApps.Select(a => AppIdentity.GameRootFolder(a.ExecutablePath)),
+                        StringComparer.OrdinalIgnoreCase
+                    );
+
                     // Scan for new applications without affecting existing ones
                     SearchForExecutables(newApps);
-                    
-                    // Only process apps that aren't already in our list by path or executable name
-                    var actuallyNewApps = newApps.Where(newApp => 
-                        !existingPaths.Contains(newApp.ExecutablePath) && 
-                        !existingExeNames.Contains(Path.GetFileName(newApp.ExecutablePath))).ToList();
+
+                    // Only process apps that aren't already in our list by path, executable name, or
+                    // game folder (and add their folder to the set so duplicates within this batch
+                    // collapse too).
+                    var actuallyNewApps = newApps.Where(newApp =>
+                        !existingPaths.Contains(newApp.ExecutablePath) &&
+                        !existingExeNames.Contains(Path.GetFileName(newApp.ExecutablePath)) &&
+                        existingRoots.Add(AppIdentity.GameRootFolder(newApp.ExecutablePath))).ToList();
                         
                     if (actuallyNewApps.Count > 0)
                     {
@@ -4999,6 +5258,14 @@ public class ApplicationInfo : ReactiveObject
         if (LastBackupTime != DateTime.MinValue)
             this.RaisePropertyChanged(nameof(LastBackupTime));
     }
+}
+
+// Lightweight, immutable row for the first-run "games we found" panel.
+public class FirstRunGameItem
+{
+    public string Name { get; set; } = string.Empty;
+    public string Detail { get; set; } = string.Empty;
+    public bool HasSave { get; set; }
 }
 
 // Save backup info class for tracking backups

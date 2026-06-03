@@ -2,37 +2,19 @@
 // Notifications API endpoint for Save Vault
 
 // Include authentication API for shared functions
-require_once 'config.php';
-require_once 'db.php';
-require_once 'jwt_helper.php';
+require_once __DIR__ . '/security.php';
+sv_init_api('GET, POST, PUT, DELETE, OPTIONS'); // error handling, JSON headers, CORS allow-list, preflight
 
-// Set headers to allow cross-origin requests and specify content type
-header('Access-Control-Allow-Origin: *');
-header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-header('Access-Control-Max-Age: 86400'); // Cache preflight response for 24 hours
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
-// Handle preflight OPTIONS request
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/jwt_helper.php';
 
 // Get the request URI and method
 $requestUri = $_SERVER['REQUEST_URI'];
 $requestMethod = $_SERVER['REQUEST_METHOD'];
 
-// Add debugging
-error_log("Notifications API - Request URI: " . $requestUri);
-error_log("Notifications API - REQUEST_METHOD: " . $requestMethod);
-error_log("Notifications API - QUERY_STRING: " . $_SERVER['QUERY_STRING']);
-
 // Parse the request path
 $path = parse_url($requestUri, PHP_URL_PATH);
-error_log("Notifications API - Path from parse_url: " . $path);
 
 // Extract endpoint from query string or path
 $endpoint = '';
@@ -90,26 +72,23 @@ if (!function_exists('sendResponse')) {
 // Import authenticateRequest function if not already defined
 if (!function_exists('authenticateRequest')) {
     function authenticateRequest($authHeader) {
-        if (!$authHeader) {
-            return null;
-        }
-        
-        // Extract token from Authorization header
-        $token = null;
-        if (strpos($authHeader, 'Bearer ') === 0) {
-            $token = substr($authHeader, 7);
-        }
-        
+        // Accept the token from the Authorization header (desktop client) or the
+        // HttpOnly session cookie (web UI). The passed $authHeader is ignored in
+        // favour of the shared resolver so cookie auth works here too.
+        $fromCookie = false;
+        $token = sv_bearer_token($fromCookie);
         if (!$token) {
             return null;
         }
-        
-        // Validate token
+
         $userData = validateJWT($token);
         if (!$userData) {
             return null;
         }
-        
+
+        // CSRF guard for cookie-authenticated state-changing requests.
+        sv_csrf_guard($fromCookie);
+
         return $userData;
     }
 }
@@ -233,7 +212,27 @@ elseif ($requestMethod === 'POST') {
         // Sanitize the message for extra security
         $message = htmlspecialchars($message, ENT_QUOTES, 'UTF-8');
         $data['message'] = $message;
-          // Create notification
+
+        // Validate optional fields against strict allow-lists / formats before
+        // they reach the database. Invalid ENUM values would otherwise be
+        // silently coerced by MySQL, and an unchecked link could carry a
+        // javascript:/data: payload to clients that render it.
+        $allowedTypes = ['info', 'warning', 'update'];
+        if (isset($data['type']) && !in_array($data['type'], $allowedTypes, true)) {
+            sendResponse(false, 'Invalid notification type', null, 400);
+            exit;
+        }
+        $allowedTargets = ['all', 'user', 'admin'];
+        if (isset($data['target_type']) && !in_array($data['target_type'], $allowedTargets, true)) {
+            sendResponse(false, 'Invalid target type', null, 400);
+            exit;
+        }
+        if (isset($data['link']) && !sv_is_safe_url($data['link'])) {
+            sendResponse(false, 'Invalid link. Only http(s) URLs are allowed.', null, 400);
+            exit;
+        }
+
+        // Create notification
         $notificationId = createNotification($data);
         
         // Check if notification was created successfully

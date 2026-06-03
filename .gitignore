@@ -28,3 +28,13 @@ fun.txt
 # Local server config backups (may contain secrets — never commit)
 Server/*.backup_*
 *.bak
+
+# Server runtime logs and rate-limit state (keep the protective files/markers)
+Server/logs/*.log
+Server/logs/ratelimit/*
+!Server/logs/.htaccess
+!Server/logs/ratelimit/.gitignore
+
+# Deploy secrets — real FTP/DB credentials live here; never commit.
+# (Use deploy.config.example.ps1 as the committed template.)
+deploy.config.ps1
